@@ -63,5 +63,22 @@ export function screeningTone(state: ScreeningState | null): PillTone {
   }
 }
 
-/** The label shown for a screening dimension when the backend sends null. */
-export const SCREENING_NOT_RUN = 'NOT_RUN';
+/**
+ * Present a canonical enum token as clean UI text WITHOUT changing the enum
+ * itself (the API contract and persisted values are unchanged). E.g.
+ * "SUFFICIENT_FOR_DISCOVERY" -> "Sufficient for discovery",
+ * "MATCH_REQUIRES_REVIEW" -> "Match requires review". No synonyms, no new
+ * meanings — just casing and spacing. Idempotent for already-spaced input.
+ */
+export function humanizeState(value: string): string {
+  const spaced = value.replace(/_/g, ' ').trim().toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/*
+ * Presentation-only display strings for DISPLAY CONDITIONS — states the backend
+ * has not produced a persisted value for yet (null). These are deliberately not
+ * ALL-CAPS enum tokens so they cannot be mistaken for canonical workflow states.
+ */
+export const IDENTITY_NOT_RESOLVED_DISPLAY = 'Not yet resolved';
+export const SCREENING_NOT_RUN_DISPLAY = 'Not run';

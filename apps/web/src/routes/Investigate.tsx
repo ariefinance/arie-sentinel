@@ -51,14 +51,13 @@ export function Investigate() {
         <p className="investigate__eyebrow">Counterparty Integrity</p>
         <h1 className="investigate__title">Investigate</h1>
         <p className="investigate__lede">
-          Record the counterparty exactly as management holds it. These are raw labels — not
-          established identities — and are never overwritten.
+          Enter the company and the contact person exactly as you received them.
         </p>
 
         <form className="investigate__form" onSubmit={handleSubmit} noValidate>
           <TextField
             label="Company"
-            hint="as management recorded it"
+            hint="as received"
             placeholder="e.g. Vantar - Castellan"
             value={company}
             onChange={(e) => setCompany(e.target.value)}
@@ -68,7 +67,7 @@ export function Investigate() {
           />
           <TextField
             label="Contact person"
-            hint="as management recorded it"
+            hint="as received"
             placeholder="e.g. Jordan Rivera"
             value={contact}
             onChange={(e) => setContact(e.target.value)}
@@ -85,13 +84,6 @@ export function Investigate() {
             </Button>
           </div>
         </form>
-
-        <div className="investigate__secondary">
-          <span className="investigate__secondary-link" aria-disabled="true" title="Not in Stage 1">
-            Import list →
-          </span>
-          <span className="investigate__secondary-note">bulk intake (later stage)</span>
-        </div>
       </div>
     </div>
   );

@@ -556,25 +556,6 @@
   min-width: 160px;
 }
 
-.investigate__secondary {
-  margin-top: var(--space-32);
-  padding-top: var(--space-16);
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-8);
-}
-
-.investigate__secondary-link {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.investigate__secondary-note {
-  font-size: var(--text-label);
-  color: var(--text-muted);
-}
-
 /* ─────────────────────────── Case workspace ─────────────────────────── */
 
 .case {
@@ -676,14 +657,6 @@
 .tab--disabled {
   color: var(--text-muted);
   cursor: not-allowed;
-}
-
-.tabs__note {
-  margin-left: auto;
-  font-size: var(--text-label);
-  font-weight: 400;
-  letter-spacing: normal;
-  color: var(--text-muted);
 }
 
 .case__body {
@@ -973,33 +946,9 @@
   border-top: 1px solid var(--border);
 }
 
-.drawer-panel__footer-note {
-  font-size: var(--text-label);
-  color: var(--text-muted);
-}
-
-.evidence-fields {
+.drawer-panel__empty {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-16);
-}
-
-.evidence-fields > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.evidence-fields dt {
-  font-size: var(--text-label);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--text-muted);
-}
-
-.evidence-fields dd {
-  margin: 0;
 }
 
 /* ─────────────────────────── Responsive ─────────────────────────── */

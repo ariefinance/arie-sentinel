@@ -6,7 +6,14 @@ import { Table } from '../components/primitives/Table';
 import type { Column } from '../components/primitives/Table';
 import { EmptyState, ErrorState, LoadingState } from '../components/primitives/StateBlocks';
 import { useWorklist } from '../lib/queries';
-import { identityTone, investigationTone, screeningTone, SCREENING_NOT_RUN } from '../lib/status';
+import {
+  humanizeState,
+  identityTone,
+  investigationTone,
+  screeningTone,
+  IDENTITY_NOT_RESOLVED_DISPLAY,
+  SCREENING_NOT_RUN_DISPLAY,
+} from '../lib/status';
 import type { WorklistFilter, WorklistItem } from '../lib/types';
 
 interface FilterDef {
@@ -19,7 +26,11 @@ interface FilterDef {
 // Every filter is a view over a canonical state; the worklist coins none of its
 // own (UI-UX-SPEC.md §1b).
 const FILTERS: FilterDef[] = [
-  { value: 'mine', label: 'Assigned to me', empty: 'Nothing is assigned to you right now.' },
+  {
+    value: 'mine',
+    label: 'My investigations',
+    empty: 'You have not created any investigations yet.',
+  },
   { value: 'needs_action', label: 'Needs action', empty: 'Nothing needs action right now.' },
   {
     value: 'clarification_required',
@@ -74,28 +85,37 @@ export function Cases() {
       key: 'investigation_state',
       header: 'Investigation',
       render: (row) => (
-        <StatusPill label={row.investigation_state} tone={investigationTone(row.investigation_state)} />
+        <StatusPill
+          label={humanizeState(row.investigation_state)}
+          tone={investigationTone(row.investigation_state)}
+        />
       ),
     },
     {
       key: 'company_identity_status',
       header: 'Legal entity',
-      render: (row) => (
-        <StatusPill
-          label={row.company_identity_status ?? 'NOT_RESOLVED'}
-          tone={identityTone(row.company_identity_status)}
-        />
-      ),
+      render: (row) =>
+        row.company_identity_status ? (
+          <StatusPill
+            label={humanizeState(row.company_identity_status)}
+            tone={identityTone(row.company_identity_status)}
+          />
+        ) : (
+          <span className="cell-muted">{IDENTITY_NOT_RESOLVED_DISPLAY}</span>
+        ),
     },
     {
       key: 'screening_state',
       header: 'Screening',
-      render: (row) => (
-        <StatusPill
-          label={row.screening_state ?? SCREENING_NOT_RUN}
-          tone={screeningTone(row.screening_state)}
-        />
-      ),
+      render: (row) =>
+        row.screening_state ? (
+          <StatusPill
+            label={humanizeState(row.screening_state)}
+            tone={screeningTone(row.screening_state)}
+          />
+        ) : (
+          <span className="cell-muted">{SCREENING_NOT_RUN_DISPLAY}</span>
+        ),
     },
     {
       key: 'needs_action',
@@ -120,7 +140,7 @@ export function Cases() {
       <div className="page__header">
         <div>
           <h1 className="page__title">Analyst Worklist</h1>
-          <p className="page__subtitle">What needs my attention now? A quiet triage view — no scores, no charts.</p>
+          <p className="page__subtitle">Counterparties awaiting your attention.</p>
         </div>
         <div className="page__header-actions">
           <Link to="/" className="btn btn--primary">

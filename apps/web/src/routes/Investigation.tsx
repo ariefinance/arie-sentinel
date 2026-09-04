@@ -6,11 +6,13 @@ import { EvidenceDrawer } from '../components/primitives/EvidenceDrawer';
 import { ErrorState, LoadingState } from '../components/primitives/StateBlocks';
 import { useAudit, useInvestigation } from '../lib/queries';
 import {
+  humanizeState,
   identityTone,
   intakeTone,
   investigationTone,
   screeningTone,
-  SCREENING_NOT_RUN,
+  IDENTITY_NOT_RESOLVED_DISPLAY,
+  SCREENING_NOT_RUN_DISPLAY,
 } from '../lib/status';
 import type { ReactNode } from 'react';
 import type { AuditEventOut, InvestigationOut, PersonCandidate } from '../lib/types';
@@ -85,17 +87,11 @@ export function Investigation() {
             );
           }
           return (
-            <span
-              key={tab}
-              className="tab tab--disabled"
-              aria-disabled="true"
-              title="Available in a later stage"
-            >
+            <span key={tab} className="tab tab--disabled" aria-disabled="true">
               {tab}
             </span>
           );
         })}
-        <span className="tabs__note">Evidence opens as a drawer, not a tab.</span>
       </nav>
 
       <div className="case__body">
@@ -113,34 +109,8 @@ export function Investigation() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         title="Evidence"
-        footer={
-          <span className="drawer-panel__footer-note">
-            Stage 1 placeholder — the source record, provenance, excerpt, and analyst validation
-            populate here.
-          </span>
-        }
       >
-        <dl className="evidence-fields">
-          <div>
-            <dt>Subject</dt>
-            <dd>{drawerSubject}</dd>
-          </div>
-          <div>
-            <dt>Source class</dt>
-            <dd className="cell-muted">— (populated in a later stage)</dd>
-          </div>
-          <div>
-            <dt>Retrieved</dt>
-            <dd className="cell-muted">—</dd>
-          </div>
-          <div>
-            <dt>Excerpt</dt>
-            <dd className="cell-muted">
-              Evidence excerpts and supports/contradicts detail appear here, closing back to this
-              context.
-            </dd>
-          </div>
-        </dl>
+        <p className="drawer-panel__empty">No evidence is available for {drawerSubject} yet.</p>
       </EvidenceDrawer>
     </div>
   );
@@ -148,7 +118,13 @@ export function Investigation() {
 
 function CaseHeader({ data }: { data: InvestigationOut }) {
   const resolved = data.counterparty;
-  const reportBlocked = data.company_identity_status !== 'CONFIRMED';
+  const identityConfirmed = data.company_identity_status === 'CONFIRMED';
+  // Two independent gates: the legal entity must be confirmed (identity gate),
+  // and the report workflow must exist (availability gate). The report is not
+  // available yet, so the control stays disabled and never does nothing.
+  const reportReason = identityConfirmed
+    ? 'Final Report is not yet available.'
+    : 'Final Report opens once the legal entity is confirmed.';
 
   return (
     <header className="case-header">
@@ -179,42 +155,37 @@ function CaseHeader({ data }: { data: InvestigationOut }) {
       </div>
 
       <div className="case-header__states">
-        <StatusPill dimension="Intake" label={data.intake_state} tone={intakeTone(data.intake_state)} />
+        <StatusPill
+          dimension="Intake"
+          label={humanizeState(data.intake_state)}
+          tone={intakeTone(data.intake_state)}
+        />
         <StatusPill
           dimension="Investigation"
-          label={data.investigation_state}
+          label={humanizeState(data.investigation_state)}
           tone={investigationTone(data.investigation_state)}
         />
         <StatusPill
           dimension="Legal entity"
-          label={data.company_identity_status ?? 'NOT_RESOLVED'}
+          label={
+            data.company_identity_status
+              ? humanizeState(data.company_identity_status)
+              : IDENTITY_NOT_RESOLVED_DISPLAY
+          }
           tone={identityTone(data.company_identity_status)}
         />
         <StatusPill
           dimension="Screening"
-          label={data.screening_state ?? SCREENING_NOT_RUN}
+          label={data.screening_state ? humanizeState(data.screening_state) : SCREENING_NOT_RUN_DISPLAY}
           tone={screeningTone(data.screening_state)}
         />
       </div>
 
       <div className="case-header__actions">
-        <Button
-          variant="primary"
-          disabled={reportBlocked}
-          aria-disabled={reportBlocked}
-          title={
-            reportBlocked
-              ? 'Final Report is available once the legal entity is CONFIRMED.'
-              : undefined
-          }
-        >
+        <Button variant="primary" disabled aria-disabled title={reportReason}>
           Final Report →
         </Button>
-        {reportBlocked ? (
-          <span className="case-header__gate-reason">
-            Final Report unlocks when the legal entity is CONFIRMED.
-          </span>
-        ) : null}
+        <span className="case-header__gate-reason">{reportReason}</span>
       </div>
     </header>
   );
@@ -247,31 +218,39 @@ function SummaryPanel({
 
       <div className="summary-grid">
         <SummaryRow label="Intake">
-          <StatusPill label={data.intake_state} tone={intakeTone(data.intake_state)} />
+          <StatusPill label={humanizeState(data.intake_state)} tone={intakeTone(data.intake_state)} />
         </SummaryRow>
         <SummaryRow label="Investigation">
           <StatusPill
-            label={data.investigation_state}
+            label={humanizeState(data.investigation_state)}
             tone={investigationTone(data.investigation_state)}
           />
         </SummaryRow>
         <SummaryRow label="Legal entity">
-          <StatusPill
-            label={data.company_identity_status ?? 'NOT_RESOLVED'}
-            tone={identityTone(data.company_identity_status)}
-          />
+          {data.company_identity_status ? (
+            <StatusPill
+              label={humanizeState(data.company_identity_status)}
+              tone={identityTone(data.company_identity_status)}
+            />
+          ) : (
+            <span className="cell-muted">{IDENTITY_NOT_RESOLVED_DISPLAY}</span>
+          )}
           {data.company_match_basis ? (
             <span className="summary-row__note">Why matched: {data.company_match_basis}</span>
           ) : null}
         </SummaryRow>
         <SummaryRow label="Completeness">
-          <span className="mono">{data.completeness_state ?? '—'}</span>
+          <span>{data.completeness_state ? humanizeState(data.completeness_state) : '—'}</span>
         </SummaryRow>
         <SummaryRow label="Screening">
-          <StatusPill
-            label={data.screening_state ?? SCREENING_NOT_RUN}
-            tone={screeningTone(data.screening_state)}
-          />
+          {data.screening_state ? (
+            <StatusPill
+              label={humanizeState(data.screening_state)}
+              tone={screeningTone(data.screening_state)}
+            />
+          ) : (
+            <span className="cell-muted">{SCREENING_NOT_RUN_DISPLAY}</span>
+          )}
         </SummaryRow>
       </div>
 
@@ -333,11 +312,11 @@ function CandidateCard({
       <div className="candidate__states">
         <span className="candidate__state-group">
           <span className="candidate__state-label">Person evidence</span>
-          <span className="mono">{candidate.person_evidence_status}</span>
+          <span>{humanizeState(candidate.person_evidence_status)}</span>
         </span>
         <span className="candidate__state-group">
           <span className="candidate__state-label">Relationship</span>
-          <span className="mono">{candidate.relationship_state}</span>
+          <span>{humanizeState(candidate.relationship_state)}</span>
         </span>
       </div>
       <button
