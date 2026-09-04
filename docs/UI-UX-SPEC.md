@@ -1,7 +1,12 @@
 # UI / UX Specification
 
-**Status:** Frozen for Phase 1 (this is the reviewed design surface). No
-application code; this specifies intent, layout, states, and text wireframes.
+**Status (build-readiness gate):** **INTERACTION / IA: FROZEN** — navigation,
+workflow, states, interaction budget, the five-tab workspace, evidence drawer,
+worklist behaviour, and report information structure are locked for
+implementation. **VISUAL DESIGN: SUBJECT TO RENDERED REVIEW** — spacing, colour,
+type, and component polish will be reviewed once the first real UI is rendered;
+the text wireframes here fix *intent and structure*, not final pixels. No
+application code.
 
 **Design objective:** *an analyst understands the counterparty position within
 ~2 minutes.* The product feels institutional, controlled, evidence-led, calm,

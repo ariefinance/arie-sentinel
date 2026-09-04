@@ -2,7 +2,9 @@
 
 **Status:** Foundational. Defines the minimal design language before any UI is
 built. Implementation-neutral: describes intent, tokens, and rules — not React
-components.
+components. **Build-readiness note:** the design *principles, tokens, and rules*
+here are the contract; **visual design is SUBJECT TO RENDERED REVIEW** once the
+first real UI exists (interaction/IA is frozen — see `UI-UX-SPEC.md`).
 
 **North star:** institutional, controlled, evidence-led, calm, high-trust. This
 is professional financial-services investigation software, **not** an analytics

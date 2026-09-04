@@ -186,18 +186,52 @@ not be surfaced. No proprietary vendor payload leaves the boundary.
 - No secrets in logs; external payloads referenced by hash, not inlined into
   application logs.
 
-## 9. Frontend/backend framework position (deferred, not frozen)
+## 9. Technical stack (DECIDED — build-readiness gate)
 
-- The brief says do not commit to FastAPI/Next.js "unless justified." We
-  **defer** the final pick to the first implementation PR, constrained by:
-  - Backend: a mature, typed, well-supported stack with first-class Postgres,
-    async jobs, and testability. (Python + FastAPI **or** TypeScript + a typed
-    Node framework both qualify; decision recorded at build start.)
-  - Frontend: a mainstream component framework with strong accessibility
-    tooling and server-render capability; **no** heavy client state library
-    until state complexity justifies it.
-- What is frozen regardless of framework: the data model, adapter boundaries,
-  async-job semantics, audit/immutability rules, and the UI/UX spec.
+Framework choice was deferred during specification; it is now **decided** for
+implementation. Bias: mature, boring, well-supported, low operational overhead,
+easy for humans and Claude to maintain. No microservices, no Kubernetes, no
+graph DB, no Redis (PostgreSQL-backed jobs suffice for Phase 1 volumes).
+
+| Concern | Decision | Why (justification) |
+|---|---|---|
+| **Backend / API** | **Python 3.12 + FastAPI** | Async-first (I/O-bound adapters), Pydantic v2 validation built in, first-class Postgres ecosystem, Python-first model/extraction libraries. Boring and ubiquitous. |
+| **DB access / ORM** | **SQLAlchemy 2.0 (typed)** | Mature, explicit, powerful; typed models; no lock-in to a thin wrapper. |
+| **Migrations** | **Alembic** | Canonical with SQLAlchemy; autogenerate + reviewable migrations; up/down in CI. |
+| **Background jobs** | **PostgreSQL-backed queue** (`SELECT … FOR UPDATE SKIP LOCKED`), via **procrastinate** | Postgres-native (no broker), transactional with the data it produces. `procrastinate` is a maintained Postgres-only task lib; a hand-rolled SKIP LOCKED worker is the trivial fallback. Redis only if throughput ever demands it. |
+| **Object storage** | **S3-compatible via `boto3`** behind a small `ObjectStore` interface; **filesystem** impl for dev (or MinIO) | Immutable raw payloads keyed by `content_ref` + `content_hash`; one interface, swappable; no blobs in the transactional DB. |
+| **AuthN** | **OIDC against the internal IdP** (`authlib`) + signed secure session cookies; dev stub IdP | Internal users only; no bespoke auth; standard, reviewable. |
+| **AuthZ / RBAC** | **Two roles** (`analyst`, `manager`) enforced by a FastAPI dependency on every mutation | Server-side, UI-independent; no external policy engine for two roles. |
+| **Validation / schema** | **Pydantic v2** | Ships with FastAPI; one validation model end-to-end. |
+| **Frontend** | **React + TypeScript + Vite** (SPA) + **TanStack Query** for server state; accessible primitives (semantic HTML + Radix UI where needed) | Internal auth-gated desktop tool → an SPA is simpler than SSR; no heavy client-state lib. Strong a11y tooling. *(This supersedes the earlier "server-render capability" note — SSR is not required for an internal tool; recorded as a justified simplification.)* |
+| **Report generation** | **Jinja2 HTML template → PDF via WeasyPrint** | Report assembled from stored data (not free-form); pure-Python HTML→PDF, **no headless browser** (aligns with the no-privileged-browser rule). |
+| **XLSX / CSV** | **openpyxl** (XLSX read/write) + stdlib **csv** | Mature, dependency-light; used for both bulk import and structured export. |
+| **Audit log** | **Append-only Postgres table**, INSERT-only role, written in the same transaction as the mutation | No extra infra; integrity by construction. |
+| **Testing** | Backend **pytest** (+ httpx test client, dockerised Postgres for integration); Frontend **Vitest** + React Testing Library; **Playwright** for E2E + axe a11y | Deterministic; fixture-driven; covers the acceptance harness (`EXAMPLE-FIXTURES.md`). |
+| **Lint / format / types** | Backend **ruff** + **mypy**; Frontend **eslint** + **prettier** + **tsc** | Fast, standard, CI-enforced. |
+| **Secrets / config** | **Pydantic Settings** from environment / secret manager; `.env` git-ignored; `.env.example` placeholders | Rotatable without code change; nothing secret in the repo. |
+
+**Frozen regardless of the above:** the data model, adapter boundaries,
+async-job semantics, audit/immutability rules, and the interaction/IA design.
+
+**UX freeze distinction (build-readiness gate):**
+**INTERACTION / IA: FROZEN.** **VISUAL DESIGN: SUBJECT TO RENDERED REVIEW** once
+the first real UI exists (`UI-UX-SPEC.md`, `DESIGN-SYSTEM.md`).
+
+### Provider strategy (build without waiting on vendor contracts)
+Define the five interfaces now (`CorporateRegistryProvider`,
+`ScreeningProvider`, `DomainRegistrationProvider`, `WebIntelligenceProvider`,
+`ModelProvider`) and build against **deterministic fixtures/mocks**, with a real
+implementation only where it is free and public:
+- `DomainRegistrationProvider` — **real RDAP** (public, structured) + fixtures.
+- `CorporateRegistryProvider` — **fixtures/mock** (a public register may be
+  wired later); real vendor swaps in behind the interface.
+- `ScreeningProvider` — **mock** (deterministic synthetic hits); real vendor later.
+- `WebIntelligenceProvider` — sandboxed public retrieval + fixtures.
+- `ModelProvider` — real model behind the isolation boundary (§6), or a
+  deterministic stub in tests.
+Simple, explicit interfaces — **no plugin framework**. Real providers replace
+mocks without touching the core.
 
 ---
 
@@ -254,6 +288,13 @@ Raised after Phase 1 scope review of intake and output ergonomics. Spec-only
 | 28 | **Structured analyst export** (CSV/XLSX evidence & findings register) | **ACCEPT (secondary)** | Assembled from stored claims/evidence/findings; **secondary** to the management report, which stays primary. **Licensing-aware** — never exports proprietary vendor payloads or source content where licensing prohibits (`SECURITY-BOUNDARIES.md`). |
 | 29 | **AI-drafted management summary** | **DEFER** | Not a Phase 1 requirement. The report is already concise/structured; a generated summary adds a factual-control + citation-validation surface. Allowed **later only if** report-writing proves a bottleneck — sentence-level cited draft under **mandatory human approval**. Not built/specified now. |
 | 30 | **Consolidated REJECT reaffirmation (Phase 1)** | **REJECT** | Reaffirmed out of scope: composite/global **risk score**, **graph database**, **graph-first UI**, **opaque AI conclusions**, **automatic clearance**, **continuous monitoring**, **autonomous acceptance/decline**, and any path that converts **absence of evidence into an adverse judgment** (`PHASE-1-SCOPE.md` §5). |
+
+### Revision 5 — build-readiness gate (decisions locked)
+
+| # | Prior verdict | Now | Action |
+|---|---|---|---|
+| 14 | Grok/LLM vendor **DEFER** | **DECIDED** | Concrete model chosen at build behind `ModelProvider` (isolation boundary §6); still swappable, still never evidence-by-itself. Locked in §9. |
+| 17 | Framework **DEFER** | **DECIDED** | Full stack locked in §9 (FastAPI + SQLAlchemy/Alembic + Postgres-backed jobs + React/TS/Vite SPA + WeasyPrint + openpyxl + ruff/mypy/eslint). SSR dropped for an internal auth-gated SPA (justified simplification). |
 
 **Net position:** the brief's technical spine (Postgres, immutable evidence,
 async, adapters, model isolation, audit, no graph DB, no lock-in) is sound and

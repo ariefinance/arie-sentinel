@@ -45,9 +45,18 @@ scanning) so every later milestone verifies itself.
 
 ## Milestone 0 — Decisions to lock at build start
 
-These are the challenge-log **DEFERRED** items. They must be resolved in the
-first build PR, recorded in an ADR, and are frozen for the rest of Phase 1. None
-may weaken a frozen boundary; each must satisfy the constraints below.
+> **DECIDED (build-readiness gate).** These were the challenge-log DEFERRED
+> items; the concrete stack is now **locked in `ARCHITECTURE.md` §9** (FastAPI +
+> SQLAlchemy 2.0/Alembic + PostgreSQL-backed jobs via procrastinate + S3/`boto3`
+> object store + OIDC/Authlib + Pydantic v2 + React/TS/Vite SPA + Jinja2/
+> WeasyPrint + openpyxl + pytest/Vitest/Playwright + ruff/mypy/eslint). M0 now
+> reduces to **recording that decision in an ADR** and generating the baseline
+> project skeleton; the table below is retained as the rationale/constraints each
+> pick had to satisfy.
+
+They must be recorded in an ADR in the first build PR and are frozen for the rest
+of Phase 1. None may weaken a frozen boundary; each satisfies the constraints
+below.
 
 | Decision | Challenge-log ref | Constraints it must satisfy |
 |---|---|---|
