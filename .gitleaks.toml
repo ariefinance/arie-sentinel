@@ -1,0 +1,21 @@
+# gitleaks configuration for ARIE Sentinel.
+# Uses gitleaks' default ruleset and allowlists only the intentional, documented
+# placeholders. No real secrets or operational data are ever permitted.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented placeholders and fictional fixtures (public dev repo)"
+# .env.example is placeholders-only by policy (docs/SECURITY-BOUNDARIES.md).
+paths = [
+  '''(^|/)\.env\.example$''',
+]
+# Obvious non-secret placeholder tokens used throughout docs and examples.
+regexes = [
+  '''changeme-placeholder''',
+  '''your-key-here''',
+  '''placeholder-[a-z-]+''',
+  '''user:password@localhost''',
+  '''arie:arie@''',
+]

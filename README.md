@@ -10,15 +10,16 @@ Repository: `ariefinance/arie-sentinel`
 
 ---
 
-> ## ⚠️ STATUS: SPECIFICATION ONLY — NO APPLICATION CODE
+> ## STATUS: Specification frozen · Build Stage 1 in progress
 >
-> This repository currently contains **specification and design documents
-> only**. There is **no application code, no scaffolding, and no framework
-> committed yet**. The specification is **pending review and approval**.
-> Implementation begins only after the spec is signed off (see
-> [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) and `CONTRIBUTING.md`). Do not add
-> application code, dependencies, or build tooling to this repository until that
-> approval has been recorded.
+> The Phase 1 specification (in [`docs/`](docs/)) is the **frozen baseline**.
+> Implementation is proceeding in controlled stages (see
+> [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md)). **Build Stage 1** establishes the
+> application foundation and the Counterparty Integrity data spine in
+> [`apps/api`](apps/api) (and the frontend shell in `apps/web`).
+> **Interaction / IA is frozen; visual design is subject to rendered review.**
+> The repository is **public by owner decision** during development — public-repo
+> data hygiene (fictional fixtures only) is mandatory.
 
 ---
 
@@ -119,10 +120,44 @@ world-readable and permanent.
 See [`docs/SECURITY-BOUNDARIES.md`](docs/SECURITY-BOUNDARIES.md) for the full
 security model.
 
-## A note on framework choices
+## Technical stack (decided)
 
-Backend and frontend framework choices are **deliberately deferred** to the
-first implementation PR. What is frozen — regardless of framework — is the data
-model, adapter boundaries, async-job semantics, audit/immutability rules, and
-the UI/UX specification. See §9 and the Technical Challenge Log in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Backend: Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 · Alembic ·
+PostgreSQL · PostgreSQL-backed jobs. Frontend: React · TypeScript · Vite ·
+TanStack Query. Report: Jinja2 → WeasyPrint. Full rationale in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §9 (Technical Challenge Log).
+
+## Development (Build Stage 1)
+
+Prerequisites: Python 3.12 (with [`uv`](https://docs.astral.sh/uv/)), Node 22
+(with `pnpm`), and a local PostgreSQL 16.
+
+```bash
+# 1) Postgres (dev role + database)
+createuser arie --createdb 2>/dev/null || true    # password: arie (dev only)
+createdb -O arie arie_sentinel
+
+# 2) Backend (locked dependencies)
+cd apps/api
+uv sync --frozen --extra dev                      # installs from uv.lock into .venv
+cp .env.example .env                              # placeholders only; never commit .env
+export ARIE_DATABASE_URL="postgresql+psycopg://arie:arie@localhost:5432/arie_sentinel"
+uv run alembic upgrade head                        # create schema + integrity guards
+uv run uvicorn arie_sentinel.main:app --reload     # http://localhost:8000  (/health, /docs)
+
+# 2b) Background worker (processes discovery jobs; run in a separate shell)
+uv run python -m arie_sentinel.jobs.worker
+
+# 3) Backend quality gates
+uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
+
+# 4) Frontend
+cd ../web
+pnpm install
+pnpm dev                                          # http://localhost:5173 (proxies /api -> :8000)
+pnpm lint && pnpm exec tsc --noEmit && pnpm test && pnpm build
+```
+
+The app uses a clearly-isolated **development identity** (send `X-Dev-Role:
+analyst|manager`); the production **OIDC** boundary is explicit but not wired in
+Stage 1. All example data is fictional (`docs/EXAMPLE-FIXTURES.md`).
