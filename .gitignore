@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────────────────────
+# ARIE Sentinel — .gitignore
+# Framework choices are deferred, so both Python and Node/JS
+# ecosystems are covered. Public repo: keep all secrets out.
+# ─────────────────────────────────────────────────────────────
+
+# ── Environment / secrets ──────────────────────────────────────
+# NEVER commit real environment files or credentials.
+# .env.example is intentionally NOT ignored (it holds placeholders only).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+*.secret
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+
+# ── Node / JavaScript ──────────────────────────────────────────
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+.npm/
+.pnp.*
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+# ── Logs ───────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Local databases ────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Object store / local artifact directories ──────────────────
+# Local stand-ins for the immutable raw-source object store.
+object-store/
+storage/
+artifacts/
+uploads/
+tmp/
+.cache/
+
+# ── OS / editor cruft ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+
+# VS Code: ignore local settings but allow shared workspace config
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
