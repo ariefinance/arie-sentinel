@@ -44,8 +44,8 @@ export interface Counterparty {
 export interface PersonCandidate {
   candidate_id: string;
   label_fragment: string;
-  person_evidence_status: string;
-  relationship_state: string;
+  person_evidence_status: string | null;
+  relationship_state: string | null;
   match_basis: string | null;
 }
 

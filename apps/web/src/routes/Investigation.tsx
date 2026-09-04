@@ -312,11 +312,17 @@ function CandidateCard({
       <div className="candidate__states">
         <span className="candidate__state-group">
           <span className="candidate__state-label">Person evidence</span>
-          <span>{humanizeState(candidate.person_evidence_status)}</span>
+          <span>
+            {candidate.person_evidence_status
+              ? humanizeState(candidate.person_evidence_status)
+              : '—'}
+          </span>
         </span>
         <span className="candidate__state-group">
           <span className="candidate__state-label">Relationship</span>
-          <span>{humanizeState(candidate.relationship_state)}</span>
+          <span>
+            {candidate.relationship_state ? humanizeState(candidate.relationship_state) : '—'}
+          </span>
         </span>
       </div>
       <button
