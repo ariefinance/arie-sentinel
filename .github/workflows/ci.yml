@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (apps/api)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: arie
+          POSTGRES_PASSWORD: arie
+          POSTGRES_DB: arie_sentinel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arie -d arie_sentinel_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ARIE_DATABASE_URL: postgresql+psycopg://arie:arie@localhost:5432/arie_sentinel_test
+      ARIE_TEST_DATABASE_URL: postgresql+psycopg://arie:arie@localhost:5432/arie_sentinel_test
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run mypy src
+
+      - name: Migration sanity (upgrade / downgrade / upgrade)
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: Tests (pytest)
+        run: uv run pytest
+
+  frontend:
+    name: Frontend (apps/web)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for frontend project
+        id: check
+        working-directory: .
+        run: |
+          if [ -f apps/web/package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "apps/web/package.json not found — skipping frontend job."
+          fi
+
+      - name: Set up pnpm
+        if: steps.check.outputs.exists == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          # Inputs resolve from repo root; point at the web package (packageManager pin).
+          package_json_file: apps/web/package.json
+
+      - name: Set up Node 22
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install dependencies (frozen)
+        if: steps.check.outputs.exists == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: steps.check.outputs.exists == 'true'
+        run: pnpm lint
+
+      - name: Type check (tsc)
+        if: steps.check.outputs.exists == 'true'
+        run: pnpm exec tsc --noEmit
+
+      - name: Tests
+        if: steps.check.outputs.exists == 'true'
+        run: pnpm test
+
+      - name: Build
+        if: steps.check.outputs.exists == 'true'
+        run: pnpm build
+
+  repo-hygiene:
+    name: Repo hygiene (secret scan & data discipline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for the secret scan
+
+      - name: Secret scan (gitleaks)
+        run: |
+          set -euo pipefail
+          VERSION=8.21.2
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks --version
+          # Scan committed history for secrets. No custom name denylist is used
+          # (a denylist of real labels would itself reintroduce the data).
+          /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --exit-code 1
+
+      - name: Data-discipline guard (no committed operational data files)
+        run: |
+          set -euo pipefail
+          # Management lists / operational data arrive as spreadsheets or real .env
+          # files. None of these belong in the repo; fixtures are code/markdown only.
+          matches="$(git ls-files '*.xlsx' '*.xls' '*.xlsm' '*.csv' '*.tsv' '.env' '**/.env' || true)"
+          if [ -n "$matches" ]; then
+            echo "::error::Committed spreadsheet/env data files are not allowed:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "OK — no committed operational data files."
+      # Fictional-fixture discipline (no management-derived tokens in code) is
+      # additionally enforced by the backend test suite:
+      # tests/test_fixtures_discipline.py.
