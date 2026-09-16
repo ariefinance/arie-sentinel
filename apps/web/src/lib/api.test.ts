@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { ApiError, createApiClient, type TokenProvider } from './api';
+import { ApiError, createApiClient, resolveAuthMode, type TokenProvider } from './api';
 
 afterEach(() => vi.unstubAllGlobals());
 
 const response = () => new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
 
 describe('API authentication boundary', () => {
+  test('runtime auth mode defaults safely and permits an explicit demo override', () => {
+    expect(resolveAuthMode(false)).toBe('production');
+    expect(resolveAuthMode(true)).toBe('development');
+    expect(resolveAuthMode(false, 'development')).toBe('development');
+    expect(resolveAuthMode(true, 'production')).toBe('production');
+    expect(resolveAuthMode(false, 'invalid')).toBe('production');
+  });
+
   test('development sends only the selected dev role header', async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => response(),

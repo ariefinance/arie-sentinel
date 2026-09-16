@@ -172,7 +172,15 @@ export function createApiClient({
   };
 }
 
-const runtimeMode: AuthMode = import.meta.env.DEV ? 'development' : 'production';
+export function resolveAuthMode(
+  buildIsDevelopment: boolean,
+  configuredMode?: string,
+): AuthMode {
+  if (configuredMode === 'development' || configuredMode === 'production') return configuredMode;
+  return buildIsDevelopment ? 'development' : 'production';
+}
+
+const runtimeMode = resolveAuthMode(import.meta.env.DEV, import.meta.env.VITE_AUTH_MODE);
 export const api = createApiClient({ mode: runtimeMode });
 
 export { DEV_ROLE };
