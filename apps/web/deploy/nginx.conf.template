@@ -5,11 +5,17 @@ server {
     auth_basic "ARIE Sentinel Management Demo";
     auth_basic_user_file /tmp/arie-sentinel-demo.htpasswd;
 
+    # Resolve Railway's private service hostname per request using the
+    # container-provided DNS server, preferring the API's healthy IPv4 listener.
+    include /tmp/arie-sentinel-resolver.conf;
+    set $api_upstream "${API_UPSTREAM}";
+
     root /usr/share/nginx/html;
     index index.html;
 
     location /api/ {
-        proxy_pass ${API_UPSTREAM}/;
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass $api_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
