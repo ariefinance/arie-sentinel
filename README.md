@@ -10,16 +10,16 @@ Repository: `ariefinance/arie-sentinel`
 
 ---
 
-> ## STATUS: Phase 1 live-intelligence implementation
+> ## STATUS: Implementation complete — awaiting production provider configuration and controlled pilot
 >
 > The Phase 1 specification (in [`docs/`](docs/)) is the **frozen baseline**.
-> Implementation is proceeding in controlled stages (see
-> [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md)). **Build Stage 1** establishes the
-> application foundation and the Counterparty Integrity data spine in
-> [`apps/api`](apps/api) (and the frontend shell in `apps/web`).
+> The bounded Phase 1 implementation is complete. Deployment configuration,
+> provider approvals, identity integration, and controlled-pilot checks are in
+> [`docs/PILOT-READINESS.md`](docs/PILOT-READINESS.md).
 > **Interaction / IA is frozen; visual design is subject to rendered review.**
-> The repository is **public by owner decision** during development — public-repo
-> data hygiene (fictional fixtures only) is mandatory.
+> This is not a production-ready regulatory screening system of record. The
+> repository remains public, so only fictional fixtures are permitted; make it
+> private before a controlled live pilot.
 
 ---
 
@@ -88,7 +88,8 @@ All specification lives in [`docs/`](docs/).
 | [`docs/CLAIMS-EVIDENCE-MODEL.md`](docs/CLAIMS-EVIDENCE-MODEL.md) | The claims/evidence/findings data model and the structurally enforced truth boundary (source fact vs claim vs assessment). |
 | [`docs/SECURITY-BOUNDARIES.md`](docs/SECURITY-BOUNDARIES.md) | Trust boundaries, prompt-injection/model boundary, data classification, and public-repository secret-hygiene rules. |
 | [`docs/ACCEPTANCE-CRITERIA.md`](docs/ACCEPTANCE-CRITERIA.md) | Testable acceptance criteria for Phase 1, including identity-resolution gating and prompt-injection resistance. |
-| [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) | Sequenced implementation plan; gates the transition from specification to code. |
+| [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md) | Historical implementation sequence for the completed Phase 1 build. |
+| [`docs/PILOT-READINESS.md`](docs/PILOT-READINESS.md) | Production configuration, provider approvals, deployment commands, pilot matrix, and management demo runbook. |
 | [`docs/UI-UX-SPEC.md`](docs/UI-UX-SPEC.md) | End-to-end UI/UX specification for the case workspace. |
 | [`docs/INFORMATION-ARCHITECTURE.md`](docs/INFORMATION-ARCHITECTURE.md) | Navigation, case structure, and how deliverables map to screens and report sections. |
 | [`docs/USER-FLOWS.md`](docs/USER-FLOWS.md) | Analyst and manager task flows, including the identity-resolution gate and report finalisation. |
