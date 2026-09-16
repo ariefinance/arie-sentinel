@@ -10,4 +10,7 @@ if [ -z "$resolver" ]; then
   echo "No container DNS resolver is configured" >&2
   exit 1
 fi
+case "$resolver" in
+  *:*) resolver="[$resolver]" ;;
+esac
 printf 'resolver %s ipv6=off valid=30s;\n' "$resolver" > /tmp/arie-sentinel-resolver.conf
