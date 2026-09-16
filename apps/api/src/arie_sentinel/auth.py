@@ -1,10 +1,4 @@
-"""Authentication / authorization boundary.
-
-The production boundary is OIDC (see docs/ARCHITECTURE.md §9). Stage 1 uses a
-clearly-isolated DEVELOPMENT identity mechanism, active only when ARIE_DEV_AUTH
-is true and never in production. This keeps the AuthZ contract (roles enforced
-server-side on every mutation) explicit from day one — no fake production auth.
-"""
+"""OIDC authentication with a clearly isolated development identity fallback."""
 
 from __future__ import annotations
 
@@ -63,9 +57,8 @@ def get_current_principal(
 ) -> Principal:
     """Resolve the current user.
 
-    Stage 1: dev-only. The `X-Dev-Role` header selects analyst/manager against the
-    configured dev identities. In production (dev_auth disabled) this raises until
-    the real OIDC dependency is wired — the boundary is explicit, not faked.
+    The `X-Dev-Role` header selects analyst/manager only when development auth is
+    enabled outside production. Otherwise, a validated OIDC bearer token is required.
     """
     if not settings.dev_auth or settings.is_production:
         if credentials is None:

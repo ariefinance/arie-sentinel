@@ -20,12 +20,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     # Development identity mechanism — clearly isolated, dev-only.
-    # The production auth boundary (OIDC) is explicit but not wired in Stage 1.
+    # Production uses the OIDC settings below when dev auth is disabled.
     dev_auth: bool = True
     dev_analyst_email: str = "analyst@example.test"
     dev_manager_email: str = "manager@example.test"
 
-    # Provider mode: Stage 1 supports "fixture" only. Real modes arrive later.
+    # Use "fixture" for deterministic local/test data and "live" for adapters.
     provider_mode: str = "fixture"
 
     provider_timeout_seconds: float = 15.0
