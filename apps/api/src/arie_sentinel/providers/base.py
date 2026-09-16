@@ -1,7 +1,7 @@
 """Provider interfaces (Protocols) and shared DTOs.
 
 These are thin, explicit contracts. The core depends only on these, never on a
-concrete vendor. Stage 1 ships fixture implementations (see fixtures.py).
+concrete vendor.
 """
 
 from __future__ import annotations
@@ -82,13 +82,25 @@ class ScreeningHit:
 
 @dataclass(frozen=True)
 class WebResult:
+    """Search discovery metadata; its excerpt is never authoritative evidence."""
+
     title: str
     url: str
     excerpt: str
     retrieved_at: str
     publisher: str | None = None
     published_at: str | None = None
-    content_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class RetrievedPage:
+    """A bounded capture of an underlying public page discovered by search."""
+
+    url: str
+    content: str
+    content_hash: str
+    content_type: str
+    retrieved_at: str
 
 
 @dataclass(frozen=True)
@@ -117,18 +129,9 @@ class ScreeningProvider(Protocol):
 class WebResearchProvider(Protocol):
     def search(self, query: str) -> list[WebResult]: ...
 
+    def retrieve(self, url: str) -> RetrievedPage | None: ...
+
 
 @runtime_checkable
 class DomainProvider(Protocol):
     def lookup(self, domain: str) -> DomainRecord | None: ...
-
-
-@runtime_checkable
-class ModelProvider(Protocol):
-    def extract_person_candidates(self, contact_label: str) -> list[str]:
-        """Propose person-name fragments from a raw contact label.
-
-        The model only *proposes*; it never establishes identity, resolves
-        entities, or produces evidence by itself (docs/SECURITY-BOUNDARIES.md §2).
-        """
-        ...

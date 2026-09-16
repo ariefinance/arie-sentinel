@@ -7,6 +7,7 @@ scenarios. No network calls, no real data, fully deterministic.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 
@@ -15,6 +16,7 @@ from .base import (
     CandidateEntity,
     DomainRecord,
     ProviderUnavailable,
+    RetrievedPage,
     ScreeningHit,
     ScreeningSubject,
     WebResult,
@@ -131,15 +133,17 @@ class FixtureWebResearchProvider:
             ]
         return []
 
-
-class FixtureModelProvider:
-    """Proposes person-name fragments only. Never establishes identity or evidence."""
-
-    _SEP = re.compile(r"\s*(?:-|/|,|&|\bvia\b)\s*", flags=re.IGNORECASE)
-
-    def extract_person_candidates(self, contact_label: str) -> list[str]:
-        parts = [p.strip() for p in self._SEP.split(contact_label) if p.strip()]
-        return parts or ([contact_label.strip()] if contact_label.strip() else [])
+    def retrieve(self, url: str) -> RetrievedPage | None:
+        if url != "https://vantar-energy.test/about":
+            return None
+        content = "Operating in energy trading since 2011."
+        return RetrievedPage(
+            url=url,
+            content=content,
+            content_hash=hashlib.sha256(content.encode()).hexdigest(),
+            content_type="text/plain",
+            retrieved_at="2026-09-04T00:00:00Z",
+        )
 
 
 @dataclass(frozen=True)
@@ -148,7 +152,6 @@ class FixtureProviders:
     screening: FixtureScreeningProvider
     domain: FixtureDomainProvider
     web: FixtureWebResearchProvider
-    model: FixtureModelProvider
 
 
 def build_fixture_providers() -> FixtureProviders:
@@ -157,5 +160,4 @@ def build_fixture_providers() -> FixtureProviders:
         screening=FixtureScreeningProvider(),
         domain=FixtureDomainProvider(),
         web=FixtureWebResearchProvider(),
-        model=FixtureModelProvider(),
     )

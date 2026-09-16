@@ -8,15 +8,14 @@ from ..config import Settings
 from .base import (
     CorporateRegistryProvider,
     DomainProvider,
-    ModelProvider,
     ProviderUnavailable,
+    RetrievedPage,
     ScreeningHit,
     ScreeningProvider,
     ScreeningSubject,
     WebResearchProvider,
     WebResult,
 )
-from .fixtures import FixtureModelProvider, build_fixture_providers
 from .gleif import GleifProvider
 from .opencorporates import OpenCorporatesProvider
 from .opensanctions import OpenSanctionsProvider
@@ -30,7 +29,6 @@ class Providers:
     screening: ScreeningProvider
     domain: DomainProvider
     web: WebResearchProvider
-    model: ModelProvider
     gleif: GleifProvider | None = None
 
 
@@ -43,16 +41,20 @@ class UnavailableWebResearchProvider:
     def search(self, query: str) -> list[WebResult]:
         raise ProviderUnavailable("web_search: approved endpoint is not configured")
 
+    def retrieve(self, url: str) -> RetrievedPage | None:
+        raise ProviderUnavailable("web_search: approved endpoint is not configured")
+
 
 def build_providers(settings: Settings) -> Providers:
     if settings.provider_mode == "fixture":
+        from .fixtures import build_fixture_providers
+
         fixture = build_fixture_providers()
         return Providers(
             registry=fixture.registry,
             screening=fixture.screening,
             domain=fixture.domain,
             web=fixture.web,
-            model=fixture.model,
         )
     if settings.provider_mode != "live":
         raise ValueError("ARIE_PROVIDER_MODE must be 'fixture' or 'live'")
@@ -83,6 +85,5 @@ def build_providers(settings: Settings) -> Providers:
         ),
         domain=RdapDomainProvider(settings.rdap_base_url, settings.provider_timeout_seconds),
         web=web,
-        model=FixtureModelProvider(),
         gleif=GleifProvider(settings.gleif_base_url, settings.provider_timeout_seconds),
     )

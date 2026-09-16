@@ -10,6 +10,7 @@ Enforced invariants (also guarded structurally in the DB):
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -43,8 +44,21 @@ from ..models.ops import Job
 from ..providers import ProviderUnavailable
 from ..providers.base import CandidateEntity, ScreeningSubject
 from ..providers.factory import Providers, build_providers
-from ..providers.fixtures import build_fixture_providers
 from ..providers.normalization import normalize_entity_name
+
+_CONTACT_SEPARATOR = re.compile(r"\s*(?:-|/|,|&|\bvia\b)\s*", flags=re.IGNORECASE)
+_THIRD_PARTY_DOMAIN_SUFFIXES = (
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "tiktok.com",
+    "twitter.com",
+    "x.com",
+    "youtube.com",
+    "google.com",
+    "bing.com",
+    "duckduckgo.com",
+)
 
 
 def get_or_create_counterparty(
@@ -76,10 +90,12 @@ def get_or_create_counterparty(
 
 
 def _derive_person_candidates(session: Session, investigation: Investigation) -> None:
-    """0..N PersonCandidates from the raw contact_label. Model proposes; never confirms."""
-    fragments = build_fixture_providers().model.extract_person_candidates(
-        investigation.contact_label
-    )
+    """Create unverified candidates by deterministically splitting the supplied label."""
+    fragments = [
+        part.strip()
+        for part in _CONTACT_SEPARATOR.split(investigation.contact_label)
+        if part.strip()
+    ]
     for frag in fragments:
         session.add(
             PersonCandidate(
@@ -283,7 +299,7 @@ def resolve_entity(
         },
     )
     active_providers = providers or build_providers(get_settings())
-    _run_screening(session, investigation, active_providers)
+    _run_screening(session, investigation, active_providers, candidate)
     _corroborate_contact(session, investigation, candidate, active_providers)
     gleif = getattr(active_providers, "gleif", None)
     if candidate.lei and gleif is not None:
@@ -388,10 +404,61 @@ def _corroborate_contact(
         person.match_basis = "Exact normalized officer name and resolved registry identifier."
 
 
-def _run_screening(session: Session, inv: Investigation, providers: Providers | Any) -> None:
-    """Record screening hits for the counterparty + contact candidates (adjudicated later)."""
+def _country_from_jurisdiction(jurisdiction: str | None) -> tuple[str, ...]:
+    if not jurisdiction:
+        return ()
+    country = jurisdiction.split("_", 1)[0].strip().upper()
+    return (country,) if len(country) == 2 and country.isalpha() else ()
+
+
+def _company_screening_subject(
+    inv: Investigation, entity: EntityCandidate | None
+) -> ScreeningSubject:
     company_label = inv.counterparty.legal_name if inv.counterparty else inv.company_label
-    subjects = [ScreeningSubject(label=company_label, schema="Company")]
+    identifiers: dict[str, set[str]] = {}
+
+    def add_identifier(key: str, value: str | None) -> None:
+        if value and value.strip():
+            identifiers.setdefault(key, set()).add(value.strip())
+
+    aliases: tuple[str, ...] = ()
+    countries: tuple[str, ...] = ()
+    if entity is not None:
+        aliases = tuple(
+            name for name in (entity.alternative_names or []) if name and name != company_label
+        )
+        countries = _country_from_jurisdiction(entity.jurisdiction)
+        add_identifier("registrationNumber", entity.registry_id)
+        add_identifier("leiCode", entity.lei)
+    if inv.counterparty is not None:
+        identifier_map = {
+            "registration_number": "registrationNumber",
+            "company_number": "registrationNumber",
+            "registry_id": "registrationNumber",
+            "lei": "leiCode",
+            "tax_number": "taxNumber",
+        }
+        for identifier in inv.counterparty.identifiers:
+            property_name = identifier_map.get(identifier.id_type.lower())
+            if property_name:
+                add_identifier(property_name, identifier.id_value)
+    return ScreeningSubject(
+        label=company_label,
+        schema="Company",
+        aliases=aliases,
+        countries=countries,
+        identifiers={key: tuple(sorted(values)) for key, values in identifiers.items()},
+    )
+
+
+def _run_screening(
+    session: Session,
+    inv: Investigation,
+    providers: Providers | Any,
+    entity: EntityCandidate | None = None,
+) -> None:
+    """Record screening hits for the counterparty + contact candidates (adjudicated later)."""
+    subjects = [_company_screening_subject(inv, entity)]
     subjects += [ScreeningSubject(label=c.label_fragment) for c in inv.candidates]
     highest = ScreeningState.NO_MATERIAL_MATCH
     order = {
@@ -430,7 +497,16 @@ def _run_screening(session: Session, inv: Investigation, providers: Providers | 
         session.add(
             Evidence(
                 source_id=source.source_id,
-                observed_value={"subject": subject.label, "match_count": len(hits)},
+                observed_value={
+                    "subject": subject.label,
+                    "aliases": list(subject.aliases),
+                    "countries": list(subject.countries),
+                    "birth_dates": list(subject.birth_dates),
+                    "identifiers": {
+                        key: list(values) for key, values in subject.identifiers.items()
+                    },
+                    "match_count": len(hits),
+                },
                 extracted_by="adapter:screening",
                 extraction_confidence=ExtractionConfidence.REPORTED,
             )
@@ -476,7 +552,6 @@ def _run_public_intelligence(
         f'"{company}" fraud',
     ]
     seen: set[str] = set()
-    checked_domains: set[str] = set()
     evidence_ids: list[uuid.UUID] = []
     try:
         result_sets = [providers.web.search(query) for query in queries]
@@ -495,69 +570,89 @@ def _run_public_intelligence(
             if result.url in seen:
                 continue
             seen.add(result.url)
+            try:
+                page = providers.web.retrieve(result.url)
+            except ProviderUnavailable:
+                page = None
+            captured = page is not None
             source = Source(
                 investigation_id=inv.investigation_id,
                 source_class=SourceClass.WEB_PUBLIC,
                 title=result.title,
                 origin_ref=result.url,
-                retrieved_at=_parse_time(result.retrieved_at),
-                captured_by="adapter:web_search",
-                content_hash=result.content_hash,
-                limitations="Public web content; discovery terms do not imply adverse content.",
+                retrieved_at=_parse_time(page.retrieved_at if page else result.retrieved_at),
+                captured_by=(
+                    "adapter:web_retrieval" if captured else "adapter:web_search:discovery"
+                ),
+                content_ref=page.url if page else None,
+                content_hash=page.content_hash if page else None,
+                limitations=(
+                    "Captured public page; discovery terms do not imply adverse content."
+                    if captured
+                    else (
+                        "Discovery lead only: underlying page was not captured; "
+                        "search snippet is not evidence."
+                    )
+                ),
                 license_class="linked-public-source",
             )
             session.add(source)
             session.flush()
-            if result.excerpt:
+            if page is not None:
                 evidence = Evidence(
                     source_id=source.source_id,
-                    excerpt=result.excerpt,
+                    excerpt=page.content,
                     observed_value={
                         "publisher": result.publisher,
                         "published_at": result.published_at,
+                        "content_type": page.content_type,
+                        "captured_url": page.url,
                     },
-                    extracted_by="adapter:web_search",
+                    extracted_by="adapter:web_retrieval",
                     extraction_confidence=ExtractionConfidence.REPORTED,
                 )
                 session.add(evidence)
                 session.flush()
                 evidence_ids.append(evidence.evidence_id)
-            domain = urlparse(result.url).hostname
-            if domain and domain not in checked_domains:
-                checked_domains.add(domain)
-                try:
-                    domain_record = providers.domain.lookup(domain)
-                except ProviderUnavailable:
-                    domain_record = None
-                if domain_record is not None:
-                    domain_source = Source(
-                        investigation_id=inv.investigation_id,
-                        source_class=SourceClass.DOMAIN_REGISTRATION,
-                        title=f"RDAP record: {domain_record.domain}",
-                        origin_ref=domain_record.source_ref,
-                        retrieved_at=datetime.now(UTC),
-                        captured_by="adapter:rdap",
-                        limitations="Domain registration does not prove company ownership.",
-                        license_class="public-rdap",
-                    )
-                    session.add(domain_source)
-                    session.flush()
-                    session.add(
-                        Evidence(
-                            source_id=domain_source.source_id,
-                            observed_value={
-                                "domain": domain_record.domain,
-                                "registrar": domain_record.registrar,
-                                "registered_on": domain_record.registered_on,
-                                "updated_on": domain_record.updated_on,
-                                "expires_on": domain_record.expires_on,
-                                "nameservers": list(domain_record.nameservers),
-                                "statuses": list(domain_record.statuses),
-                            },
-                            extracted_by="adapter:rdap",
-                            extraction_confidence=ExtractionConfidence.REPORTED,
-                        )
-                    )
+    for domain, association_basis in _claimed_company_domains(inv).items():
+        try:
+            domain_record = providers.domain.lookup(domain)
+        except ProviderUnavailable:
+            domain_record = None
+        if domain_record is not None:
+            domain_source = Source(
+                investigation_id=inv.investigation_id,
+                source_class=SourceClass.DOMAIN_REGISTRATION,
+                title=f"RDAP record: {domain_record.domain}",
+                origin_ref=domain_record.source_ref,
+                retrieved_at=datetime.now(UTC),
+                captured_by="adapter:rdap",
+                limitations=(
+                    f"Domain association basis: {association_basis}. "
+                    "Registration metadata does not prove company ownership."
+                ),
+                license_class="public-rdap",
+            )
+            session.add(domain_source)
+            session.flush()
+            session.add(
+                Evidence(
+                    source_id=domain_source.source_id,
+                    observed_value={
+                        "domain": domain_record.domain,
+                        "association_basis": association_basis,
+                        "ownership_proven": False,
+                        "registrar": domain_record.registrar,
+                        "registered_on": domain_record.registered_on,
+                        "updated_on": domain_record.updated_on,
+                        "expires_on": domain_record.expires_on,
+                        "nameservers": list(domain_record.nameservers),
+                        "statuses": list(domain_record.statuses),
+                    },
+                    extracted_by="adapter:rdap",
+                    extraction_confidence=ExtractionConfidence.REPORTED,
+                )
+            )
     for candidate in inv.candidates:
         if candidate.relationship_state is not RelationshipState.VERIFIED:
             candidate.relationship_state = RelationshipState.UNVERIFIED
@@ -586,3 +681,30 @@ def _run_public_intelligence(
             created_by="system",
         )
     )
+
+
+def _claimed_company_domains(inv: Investigation) -> dict[str, str]:
+    """Return only explicitly claimed/recorded company domains, never search-result hosts."""
+    domains: dict[str, str] = {}
+
+    def add(value: object, basis: str) -> None:
+        if not isinstance(value, str) or not value.strip():
+            return
+        candidate = value.strip()
+        parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+        hostname = parsed.hostname.rstrip(".").lower() if parsed.hostname else None
+        is_third_party = hostname and any(
+            hostname == suffix or hostname.endswith(f".{suffix}")
+            for suffix in _THIRD_PARTY_DOMAIN_SUFFIXES
+        )
+        if hostname and not is_third_party:
+            domains[hostname] = basis
+
+    context = inv.case_context or {}
+    for key in ("company_domain", "domain", "website"):
+        add(context.get(key), f"supplied case context field '{key}'")
+    if inv.counterparty is not None:
+        for identifier in inv.counterparty.identifiers:
+            if identifier.id_type.lower() in {"domain", "website"}:
+                add(identifier.id_value, f"stored counterparty identifier '{identifier.id_type}'")
+    return domains
