@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,7 +15,9 @@ from .models.enums import (
     InvestigationState,
     PersonEvidenceStatus,
     RelationshipState,
+    ReviewStatus,
     ScreeningState,
+    SourceClass,
 )
 
 
@@ -45,6 +48,25 @@ class CounterpartyOut(BaseModel):
     identity_key: str
 
 
+class EntityCandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    entity_candidate_id: uuid.UUID
+    legal_name: str
+    jurisdiction: str | None
+    registry_class: str | None
+    registry_id: str | None
+    legal_status: str | None
+    registered_address: str | None
+    incorporation_date: str | None
+    lei: str | None
+    alternative_names: list[str] | None
+    provider: str
+    source_ref: str | None
+    retrieved_at: datetime
+    match_basis: str | None
+
+
 class InvestigationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,6 +82,7 @@ class InvestigationOut(BaseModel):
     screening_state: ScreeningState | None
     counterparty: CounterpartyOut | None = None
     candidates: list[PersonCandidateOut] = Field(default_factory=list)
+    entity_candidates: list[EntityCandidateOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -94,3 +117,65 @@ class HealthOut(BaseModel):
     status: str
     version: str
     database: str
+
+
+class ResolveEntityRequest(BaseModel):
+    candidate_id: uuid.UUID
+    rationale: str = Field(min_length=3, max_length=2000)
+
+
+class FinaliseReportRequest(BaseModel):
+    confirm_finalise: Literal[True]
+
+
+class ReviewRequest(BaseModel):
+    disposition: str = Field(min_length=3, max_length=32)
+    rationale: str = Field(min_length=3, max_length=2000)
+
+
+class SourceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    source_id: uuid.UUID
+    source_class: SourceClass
+    title: str
+    origin_ref: str | None
+    retrieved_at: datetime
+    captured_by: str
+    limitations: str | None
+    license_class: str | None
+
+
+class ScreeningResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    screening_result_id: uuid.UUID
+    subject_label: str
+    list_or_source: str
+    state: ScreeningState
+    match_basis: str | None
+    matched_profile_id: str | None
+    match_score: float | None
+    match_explanation: dict[str, object] | None
+    matched_identifiers: dict[str, object] | None
+    datasets: list[str] | None
+    source_id: uuid.UUID | None
+    analyst_disposition: str | None
+    analyst_rationale: str | None
+    created_at: datetime
+
+
+class FindingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    finding_id: uuid.UUID
+    finding_type: str
+    severity: str
+    title: str
+    claim_text: str
+    evidence_text: str
+    assessment_text: str
+    action_text: str
+    related_evidence_ids: list[uuid.UUID] | None
+    review_status: ReviewStatus
+    created_at: datetime

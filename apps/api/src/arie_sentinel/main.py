@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
-from .api import health, investigations, worklist
+from .api import health, investigations, reviews, worklist
 from .config import get_settings
 
 
@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(investigations.router)
     app.include_router(worklist.router)
+    app.include_router(reviews.router)
     return app
 
 

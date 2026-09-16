@@ -20,13 +20,32 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     # Development identity mechanism — clearly isolated, dev-only.
-    # The production auth boundary (OIDC) is explicit but not wired in Stage 1.
+    # Production uses the OIDC settings below when dev auth is disabled.
     dev_auth: bool = True
     dev_analyst_email: str = "analyst@example.test"
     dev_manager_email: str = "manager@example.test"
 
-    # Provider mode: Stage 1 supports "fixture" only. Real modes arrive later.
+    # Use "fixture" for deterministic local/test data and "live" for adapters.
     provider_mode: str = "fixture"
+
+    provider_timeout_seconds: float = 15.0
+    opencorporates_base_url: str = "https://api.opencorporates.com/v0.4"
+    opencorporates_api_key: str | None = None
+    gleif_base_url: str = "https://api.gleif.org/api/v1"
+    opensanctions_base_url: str = "https://api.opensanctions.org"
+    opensanctions_api_key: str | None = None
+    opensanctions_dataset: str = "default"
+    rdap_base_url: str = "https://rdap.org"
+    web_search_base_url: str | None = None
+    web_search_api_key: str | None = None
+    web_search_provider: str = "structured"
+
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_roles_claim: str = "roles"
+    oidc_analyst_role: str = "sentinel-analyst"
+    oidc_manager_role: str = "sentinel-manager"
 
     @property
     def cors_origin_list(self) -> list[str]:

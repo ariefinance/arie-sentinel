@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font: 10pt Arial, sans-serif; color: #17212b; line-height: 1.45; }
+    h1 { font-size: 20pt; margin-bottom: 4px; } h2 { font-size: 13pt; margin-top: 22px; border-bottom: 1px solid #ccd4dc; }
+    table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 5px; border-bottom: 1px solid #e4e8ec; vertical-align: top; }
+    .meta { color: #56616c; font-size: 8.5pt; } .state { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Counterparty Integrity Report</h1>
+  <div class="meta">Investigation {{ investigation.investigation_id }} · generated from stored, reviewable records</div>
+
+  <h2>1. Subject / resolved entity</h2>
+  <p><strong>Submitted company:</strong> {{ investigation.company_label }}<br>
+  <strong>Resolved entity:</strong> {{ investigation.counterparty.legal_name if investigation.counterparty else "Not established" }}<br>
+  <strong>Identity state:</strong> <span class="state">{{ investigation.company_identity_status.value if investigation.company_identity_status else "NOT_VERIFIED" }}</span><br>
+  <strong>Resolution basis:</strong> {{ investigation.company_match_basis or "No authoritative resolution recorded" }}</p>
+
+  <h2>2. Executive summary</h2>
+  <p>The legal-entity, person relationship, screening, public-source, and limitation records below reflect the evidence retained by Sentinel. Potential screening matches require analyst disposition and are not findings of identity by themselves.</p>
+
+  <h2>3. Company identity</h2>
+  {% if investigation.counterparty %}<p>{{ investigation.counterparty.legal_name }} · {{ investigation.counterparty.jurisdiction or "jurisdiction unavailable" }} · {{ investigation.counterparty.registry_id or "registry number unavailable" }} · {{ investigation.counterparty.status or "status unavailable" }}</p>{% else %}<p>Could not establish a resolved legal entity.</p>{% endif %}
+
+  <h2>4. Named person / relationship</h2>
+  <p><strong>Submitted contact:</strong> {{ investigation.contact_label }}</p>
+  {% for person in investigation.candidates %}<p>{{ person.label_fragment }} — {{ person.relationship_state.value if person.relationship_state else "UNVERIFIED" }}{% if person.match_basis %}: {{ person.match_basis }}{% endif %}{% if person.relationship_state and person.relationship_state.value == "VERIFIED" %}<br><em>This verifies a registry relationship for a person with this name, not the physical identity of the submitted individual.</em>{% endif %}</p>{% else %}<p>No person candidate was derived.</p>{% endfor %}
+
+  <h2>5. Screening</h2>
+  <table><tr><th>Subject</th><th>Potential match / basis</th><th>Disposition</th></tr>
+  {% for item in screening %}<tr><td>{{ item.subject_label }}</td><td>{{ item.matched_profile_id or "No profile" }}<br>{{ item.match_basis or "—" }}{% if item.match_score is not none %} ({{ "%.3f"|format(item.match_score) }}){% endif %}</td><td>{{ item.analyst_disposition or "Pending analyst review" }}{% if item.analyst_rationale %}<br>{{ item.analyst_rationale }}{% endif %}</td></tr>{% else %}<tr><td colspan="3">{{ screening_summary }}</td></tr>{% endfor %}</table>
+
+  <h2>6. Findings / contradictions / follow-up</h2>
+  {% for item in findings %}<p><strong>{{ item.title }}</strong> [{{ item.review_status.value }}]<br>{{ item.assessment_text }}<br><em>Action:</em> {{ item.action_text }}</p>{% else %}<p>No system findings were recorded. This does not mean that every fact was established.</p>{% endfor %}
+
+  <h2>7. Could not establish / limitations</h2>
+  <p>Completeness: {{ investigation.completeness_state.value if investigation.completeness_state else "Not assessed" }}. Missing or unavailable sources remain explicit; absence of a match is not proof of absence.</p>
+
+  <h2>8. Sources</h2>
+  <table><tr><th>Source</th><th>Class</th><th>Retrieved</th></tr>
+  {% for source in sources %}<tr><td>{{ source.title }}{% if source.origin_ref %}<br><span class="meta">{{ source.origin_ref }}</span>{% endif %}</td><td>{{ source.source_class.value }}</td><td>{{ source.retrieved_at }}</td></tr>{% else %}<tr><td colspan="3">No sources retained.</td></tr>{% endfor %}</table>
+
+  <h2>9. Analyst review / audit metadata</h2>
+  <p>{{ audit|length }} audit event(s) retained. Report conclusions remain traceable to the source and evidence records identified above.</p>
+</body>
+</html>

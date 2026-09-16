@@ -80,6 +80,21 @@ def test_evidence_is_append_only(db: Session) -> None:
     db.rollback()
 
 
+def test_ai_output_cannot_be_authoritative_evidence(db: Session) -> None:
+    src = _source(db, _investigation(db))
+    db.add(
+        Evidence(
+            source_id=src.source_id,
+            excerpt="Model-generated assessment",
+            extracted_by="model:assessment",
+            extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+        )
+    )
+    with pytest.raises(DBAPIError):
+        db.flush()
+    db.rollback()
+
+
 def test_audit_is_append_only(db: Session) -> None:
     inv = _investigation(db)
     ev = db.scalar(select(AuditEvent).where(AuditEvent.investigation_id == inv.investigation_id))

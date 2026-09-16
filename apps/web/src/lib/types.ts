@@ -49,6 +49,23 @@ export interface PersonCandidate {
   match_basis: string | null;
 }
 
+export interface EntityCandidate {
+  entity_candidate_id: string;
+  legal_name: string;
+  jurisdiction: string | null;
+  registry_class: string | null;
+  registry_id: string | null;
+  legal_status: string | null;
+  registered_address: string | null;
+  incorporation_date: string | null;
+  lei: string | null;
+  alternative_names: string[] | null;
+  provider: string;
+  source_ref: string | null;
+  retrieved_at: string;
+  match_basis: string | null;
+}
+
 export interface InvestigationOut {
   investigation_id: string;
   company_label: string;
@@ -62,6 +79,7 @@ export interface InvestigationOut {
   screening_state: ScreeningState | null;
   counterparty: Counterparty | null;
   candidates: PersonCandidate[];
+  entity_candidates: EntityCandidate[];
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +115,48 @@ export interface HealthOut {
 export interface CreateInvestigationBody {
   company_label: string;
   contact_label: string;
+}
+
+export interface SourceOut {
+  source_id: string;
+  source_class: string;
+  title: string;
+  origin_ref: string | null;
+  retrieved_at: string;
+  captured_by: string;
+  limitations: string | null;
+  license_class: string | null;
+}
+
+export interface ScreeningResultOut {
+  screening_result_id: string;
+  subject_label: string;
+  list_or_source: string;
+  state: ScreeningState;
+  match_basis: string | null;
+  matched_profile_id: string | null;
+  match_score: number | null;
+  match_explanation: Record<string, unknown> | null;
+  matched_identifiers: Record<string, unknown> | null;
+  datasets: string[] | null;
+  source_id: string | null;
+  analyst_disposition: string | null;
+  analyst_rationale: string | null;
+  created_at: string;
+}
+
+export interface FindingOut {
+  finding_id: string;
+  finding_type: string;
+  severity: string;
+  title: string;
+  claim_text: string;
+  evidence_text: string;
+  assessment_text: string;
+  action_text: string;
+  related_evidence_ids: string[] | null;
+  review_status: string;
+  created_at: string;
 }
 
 /** Derived worklist filters — views over canonical states, never new states. */

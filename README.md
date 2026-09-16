@@ -10,7 +10,7 @@ Repository: `ariefinance/arie-sentinel`
 
 ---
 
-> ## STATUS: Specification frozen · Build Stage 1 in progress
+> ## STATUS: Phase 1 live-intelligence implementation
 >
 > The Phase 1 specification (in [`docs/`](docs/)) is the **frozen baseline**.
 > Implementation is proceeding in controlled stages (see
@@ -127,10 +127,11 @@ PostgreSQL · PostgreSQL-backed jobs. Frontend: React · TypeScript · Vite ·
 TanStack Query. Report: Jinja2 → WeasyPrint. Full rationale in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §9 (Technical Challenge Log).
 
-## Development (Build Stage 1)
+## Development
 
 Prerequisites: Python 3.12 (with [`uv`](https://docs.astral.sh/uv/)), Node 22
-(with `pnpm`), and a local PostgreSQL 16.
+(with `pnpm`), a local PostgreSQL 16, and the native Pango runtime required by
+WeasyPrint (Linux packages: `libpango-1.0-0 libpangoft2-1.0-0`).
 
 ```bash
 # 1) Postgres (dev role + database)
@@ -145,7 +146,7 @@ export ARIE_DATABASE_URL="postgresql+psycopg://arie:arie@localhost:5432/arie_sen
 uv run alembic upgrade head                        # create schema + integrity guards
 uv run uvicorn arie_sentinel.main:app --reload     # http://localhost:8000  (/health, /docs)
 
-# 2b) Background worker (processes discovery jobs; run in a separate shell)
+# 2b) Background worker (processes discovery/enrichment jobs; run separately)
 uv run python -m arie_sentinel.jobs.worker
 
 # 3) Backend quality gates
@@ -159,5 +160,17 @@ pnpm lint && pnpm exec tsc --noEmit && pnpm test && pnpm build
 ```
 
 The app uses a clearly-isolated **development identity** (send `X-Dev-Role:
-analyst|manager`); the production **OIDC** boundary is explicit but not wired in
-Stage 1. All example data is fictional (`docs/EXAMPLE-FIXTURES.md`).
+analyst|manager`). In production, disable `ARIE_DEV_AUTH` and configure the OIDC
+issuer, audience, JWKS URL and Sentinel role mappings shown in
+[`apps/api/.env.example`](apps/api/.env.example). The production frontend auth
+layer must call `configureTokenProvider` with its OIDC token/role provider before
+API requests; production requests fail closed when no bearer token is available.
+Set `ARIE_PROVIDER_MODE=live`
+to use OpenCorporates, GLEIF, OpenSanctions matching, RDAP, and the configured
+structured web-search adapter. Provider responses are normalized into immutable
+source/evidence records; raw payloads are not retained. OpenSanctions business
+use requires an appropriate commercial licence. Live web results remain
+discovery-only until deployment supplies a connection-pinned retrieval/egress
+service; Sentinel does not perform a DNS-check-then-reresolve fetch. `rigour` normalization can be
+enabled with `uv sync --extra normalization` where ICU runtime support is
+available. All committed example data remains fictional.
