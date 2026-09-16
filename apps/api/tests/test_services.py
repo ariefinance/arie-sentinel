@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from arie_sentinel.models.core import Counterparty, Investigation, PersonCandidate
+from arie_sentinel.models.core import Counterparty, EntityCandidate, Investigation, PersonCandidate
 from arie_sentinel.models.enums import (
     AuditAction,
     CompanyIdentityStatus,
@@ -16,7 +16,11 @@ from arie_sentinel.models.enums import (
     InvestigationState,
 )
 from arie_sentinel.models.ops import AuditEvent
-from arie_sentinel.services.investigations import create_investigation, run_discovery
+from arie_sentinel.services.investigations import (
+    create_investigation,
+    resolve_entity,
+    run_discovery,
+)
 
 ANALYST = "analyst@example.test"
 
@@ -27,14 +31,32 @@ def _create(db: Session, company: str, contact: str) -> Investigation:
     return inv
 
 
-def test_clean_resolved_entity_confirms_and_links(db: Session) -> None:
+def test_one_name_search_result_does_not_auto_confirm(db: Session) -> None:
     inv = _create(db, "Vantar - Castellan", "Jordan Rivera")
     assert inv.intake_state is IntakeState.SUFFICIENT_FOR_DISCOVERY
     run_discovery(db, inv.investigation_id)
     db.flush()
+    assert inv.company_identity_status is CompanyIdentityStatus.AMBIGUOUS
+    assert inv.counterparty_id is None
+    assert len(inv.entity_candidates) == 1
+    assert inv.investigation_state is InvestigationState.COMPLETED
+
+
+def test_authoritative_candidate_can_be_selected_and_is_audited(db: Session) -> None:
+    inv = _create(db, "Vantar - Castellan", "Jordan Rivera")
+    run_discovery(db, inv.investigation_id)
+    candidate = db.scalar(
+        select(EntityCandidate).where(EntityCandidate.investigation_id == inv.investigation_id)
+    )
+    assert candidate is not None
+    resolve_entity(db, inv, candidate, actor=ANALYST, rationale="Registry number checked")
+    db.flush()
     assert inv.company_identity_status is CompanyIdentityStatus.CONFIRMED
     assert inv.counterparty_id is not None
-    assert inv.investigation_state is InvestigationState.COMPLETED
+    actions = db.scalars(
+        select(AuditEvent.action).where(AuditEvent.investigation_id == inv.investigation_id)
+    ).all()
+    assert AuditAction.RESOLVE_IDENTITY in actions
 
 
 def test_insufficient_intake_blocks_discovery(db: Session) -> None:
@@ -62,6 +84,8 @@ def test_repeated_counterparty_links_not_duplicates(db: Session) -> None:
     b = _create(db, "Vantar - Castellan", "Amara")
     run_discovery(db, a.investigation_id)
     run_discovery(db, b.investigation_id)
+    resolve_entity(db, a, a.entity_candidates[0], actor=ANALYST, rationale="Registry checked")
+    resolve_entity(db, b, b.entity_candidates[0], actor=ANALYST, rationale="Registry checked")
     db.flush()
     assert a.counterparty_id is not None
     assert a.counterparty_id == b.counterparty_id

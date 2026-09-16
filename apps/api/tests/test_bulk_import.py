@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from arie_sentinel.models.core import Counterparty, Investigation
 from arie_sentinel.models.enums import ImportRowOutcome
 from arie_sentinel.services.bulk_import import file_fingerprint, import_rows
-from arie_sentinel.services.investigations import run_discovery
+from arie_sentinel.services.investigations import resolve_entity, run_discovery
 
 ANALYST = "analyst@example.test"
 
@@ -85,6 +85,13 @@ def test_repeated_counterparty_dedups_at_identity_key(db: Session) -> None:
     # Resolve every sufficient investigation.
     for inv in db.scalars(select(Investigation)).all():
         run_discovery(db, inv.investigation_id)
+        resolve_entity(
+            db,
+            inv,
+            inv.entity_candidates[0],
+            actor=ANALYST,
+            rationale="Registry number and jurisdiction checked",
+        )
     db.flush()
     # Three investigations (2x "Vantar - Castellan", 1x "Castellan Trading") but the
     # two Vantar rows share one Counterparty; Castellan is another -> 2 counterparties.

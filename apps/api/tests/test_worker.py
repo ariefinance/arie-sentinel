@@ -29,7 +29,7 @@ def test_worker_processes_discovery(db: Session) -> None:
     assert processed == 1
     db.expire_all()
     inv = db.get(Investigation, inv.investigation_id)
-    assert inv.company_identity_status is CompanyIdentityStatus.CONFIRMED
+    assert inv.company_identity_status is CompanyIdentityStatus.AMBIGUOUS
     assert _job_for(db, inv).status is JobStatus.SUCCEEDED
 
 
@@ -54,7 +54,7 @@ def test_stale_running_job_is_reclaimed_after_crash(db: Session) -> None:
     assert run_pending_jobs(db) == 1
     db.expire_all()
     assert db.get(Investigation, inv.investigation_id).company_identity_status is (
-        CompanyIdentityStatus.CONFIRMED
+        CompanyIdentityStatus.AMBIGUOUS
     )
 
 
