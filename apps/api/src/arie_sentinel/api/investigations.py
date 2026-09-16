@@ -4,20 +4,28 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..audit import record_audit
 from ..auth import Principal, get_current_principal
 from ..db import get_db
-from ..models.core import Investigation
+from ..models.core import EntityCandidate, Investigation
+from ..models.enums import AuditAction, CompanyIdentityStatus
+from ..models.evidence import Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
 from ..schemas import (
     AuditEventOut,
     CreateInvestigationRequest,
+    FindingOut,
     InvestigationOut,
+    ResolveEntityRequest,
+    ScreeningResultOut,
+    SourceOut,
 )
-from ..services.investigations import create_investigation
+from ..services.investigations import create_investigation, resolve_entity
+from ..services.reports import render_report, report_filename
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
 
@@ -29,6 +37,7 @@ def _load(db: Session, investigation_id: uuid.UUID) -> Investigation:
         .options(
             selectinload(Investigation.counterparty),
             selectinload(Investigation.candidates),
+            selectinload(Investigation.entity_candidates),
         )
     )
     if inv is None:
@@ -80,3 +89,118 @@ def get_audit(
         .order_by(AuditEvent.created_at.asc())
     ).all()
     return [AuditEventOut.model_validate(e) for e in events]
+
+
+@router.get("/{investigation_id}/sources", response_model=list[SourceOut])
+def get_sources(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> list[SourceOut]:
+    _load(db, investigation_id)
+    rows = db.scalars(
+        select(Source)
+        .where(Source.investigation_id == investigation_id)
+        .order_by(Source.retrieved_at.desc())
+    ).all()
+    return [SourceOut.model_validate(row) for row in rows]
+
+
+@router.get("/{investigation_id}/screening", response_model=list[ScreeningResultOut])
+def get_screening(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> list[ScreeningResultOut]:
+    _load(db, investigation_id)
+    rows = db.scalars(
+        select(ScreeningResult)
+        .where(ScreeningResult.investigation_id == investigation_id)
+        .order_by(ScreeningResult.created_at.asc())
+    ).all()
+    return [ScreeningResultOut.model_validate(row) for row in rows]
+
+
+@router.get("/{investigation_id}/findings", response_model=list[FindingOut])
+def get_findings(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> list[FindingOut]:
+    _load(db, investigation_id)
+    rows = db.scalars(
+        select(Finding)
+        .where(Finding.investigation_id == investigation_id)
+        .order_by(Finding.created_at.asc())
+    ).all()
+    return [FindingOut.model_validate(row) for row in rows]
+
+
+@router.get("/{investigation_id}/company", response_model=InvestigationOut)
+def get_company(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> InvestigationOut:
+    return InvestigationOut.model_validate(_load(db, investigation_id))
+
+
+@router.get("/{investigation_id}/person", response_model=InvestigationOut)
+def get_person(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> InvestigationOut:
+    return InvestigationOut.model_validate(_load(db, investigation_id))
+
+
+@router.post("/{investigation_id}/resolve-entity", response_model=InvestigationOut)
+def resolve(
+    investigation_id: uuid.UUID,
+    body: ResolveEntityRequest,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> InvestigationOut:
+    inv = _load(db, investigation_id)
+    if inv.company_identity_status is not None and inv.company_identity_status.value == "CONFIRMED":
+        raise HTTPException(status_code=409, detail="Entity is already resolved.")
+    candidate = db.get(EntityCandidate, body.candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found.")
+    try:
+        resolve_entity(db, inv, candidate, actor=principal.email, rationale=body.rationale)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    return InvestigationOut.model_validate(_load(db, investigation_id))
+
+
+@router.post("/{investigation_id}/report")
+def report(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> Response:
+    inv = _load(db, investigation_id)
+    if inv.company_identity_status is not CompanyIdentityStatus.CONFIRMED:
+        raise HTTPException(status_code=409, detail="Resolve the legal entity before reporting.")
+    try:
+        pdf = render_report(db, inv)
+    except (ImportError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="PDF renderer is unavailable.") from exc
+    record_audit(
+        db,
+        actor=principal.email,
+        action=AuditAction.FINALISE_REPORT,
+        object_type="report",
+        investigation_id=inv.investigation_id,
+        payload={"format": "pdf"},
+    )
+    db.commit()
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{report_filename(investigation_id)}"'
+        },
+    )

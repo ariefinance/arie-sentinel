@@ -7,6 +7,9 @@ export const queryKeys = {
   worklist: (filter: WorklistFilter) => ['worklist', filter] as const,
   investigation: (id: string) => ['investigation', id] as const,
   audit: (id: string) => ['investigation', id, 'audit'] as const,
+  sources: (id: string) => ['investigation', id, 'sources'] as const,
+  screening: (id: string) => ['investigation', id, 'screening'] as const,
+  findings: (id: string) => ['investigation', id, 'findings'] as const,
 };
 
 export function useHealth() {
@@ -46,6 +49,45 @@ export function useAudit(id: string) {
     queryKey: queryKeys.audit(id),
     queryFn: ({ signal }) => api.getAudit(id, signal),
     enabled: id.length > 0,
+  });
+}
+
+export function useSources(id: string) {
+  return useQuery({ queryKey: queryKeys.sources(id), queryFn: ({ signal }) => api.getSources(id, signal), enabled: id.length > 0 });
+}
+
+export function useScreening(id: string) {
+  return useQuery({ queryKey: queryKeys.screening(id), queryFn: ({ signal }) => api.getScreening(id, signal), enabled: id.length > 0 });
+}
+
+export function useFindings(id: string) {
+  return useQuery({ queryKey: queryKeys.findings(id), queryFn: ({ signal }) => api.getFindings(id, signal), enabled: id.length > 0 });
+}
+
+export function useResolveEntity(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ candidateId, rationale }: { candidateId: string; rationale: string }) => api.resolveEntity(id, candidateId, rationale),
+    onSuccess: (data) => {
+      client.setQueryData(queryKeys.investigation(id), data);
+      void client.invalidateQueries({ queryKey: ['investigation', id] });
+    },
+  });
+}
+
+export function useReviewScreening(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ resultId, disposition, rationale }: { resultId: string; disposition: string; rationale: string }) => api.reviewScreening(resultId, disposition, rationale),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.screening(id) }),
+  });
+}
+
+export function useReviewFinding(id: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ findingId, disposition, rationale }: { findingId: string; disposition: string; rationale: string }) => api.reviewFinding(findingId, disposition, rationale),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.findings(id) }),
   });
 }
 

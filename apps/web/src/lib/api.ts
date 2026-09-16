@@ -10,8 +10,11 @@ import type {
   AuditEventOut,
   CreateInvestigationBody,
   HealthOut,
+  FindingOut,
   InvestigationOut,
   Role,
+  ScreeningResultOut,
+  SourceOut,
   WorklistFilter,
   WorklistItem,
 } from './types';
@@ -81,6 +84,15 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return JSON.parse(text) as T;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'X-Dev-Role': DEV_ROLE },
+  });
+  if (!response.ok) throw new ApiError(response.status, `Report failed (${response.status}).`, await response.text());
+  return response.blob();
+}
+
 export const api = {
   health: (signal?: AbortSignal): Promise<HealthOut> => request<HealthOut>('/health', { signal }),
 
@@ -92,6 +104,32 @@ export const api = {
 
   getAudit: (id: string, signal?: AbortSignal): Promise<AuditEventOut[]> =>
     request<AuditEventOut[]>(`/investigations/${encodeURIComponent(id)}/audit`, { signal }),
+
+  getSources: (id: string, signal?: AbortSignal): Promise<SourceOut[]> =>
+    request<SourceOut[]>(`/investigations/${encodeURIComponent(id)}/sources`, { signal }),
+
+  getScreening: (id: string, signal?: AbortSignal): Promise<ScreeningResultOut[]> =>
+    request<ScreeningResultOut[]>(`/investigations/${encodeURIComponent(id)}/screening`, { signal }),
+
+  getFindings: (id: string, signal?: AbortSignal): Promise<FindingOut[]> =>
+    request<FindingOut[]>(`/investigations/${encodeURIComponent(id)}/findings`, { signal }),
+
+  resolveEntity: (id: string, candidateId: string, rationale: string): Promise<InvestigationOut> =>
+    request<InvestigationOut>(`/investigations/${encodeURIComponent(id)}/resolve-entity`, {
+      method: 'POST', body: { candidate_id: candidateId, rationale },
+    }),
+
+  reviewScreening: (id: string, disposition: string, rationale: string): Promise<ScreeningResultOut> =>
+    request<ScreeningResultOut>(`/screening-results/${encodeURIComponent(id)}/review`, {
+      method: 'POST', body: { disposition, rationale },
+    }),
+
+  reviewFinding: (id: string, disposition: string, rationale: string): Promise<FindingOut> =>
+    request<FindingOut>(`/findings/${encodeURIComponent(id)}/review`, {
+      method: 'POST', body: { disposition, rationale },
+    }),
+
+  createReport: (id: string): Promise<Blob> => requestBlob(`/investigations/${encodeURIComponent(id)}/report`),
 
   getWorklist: (filter: WorklistFilter, signal?: AbortSignal): Promise<WorklistItem[]> =>
     request<WorklistItem[]>(`/worklist?filter=${encodeURIComponent(filter)}`, { signal }),

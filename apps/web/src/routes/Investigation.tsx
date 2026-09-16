@@ -1,387 +1,123 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '../components/primitives/Button';
-import { StatusPill } from '../components/primitives/StatusPill';
 import { EvidenceDrawer } from '../components/primitives/EvidenceDrawer';
 import { ErrorState, LoadingState } from '../components/primitives/StateBlocks';
-import { useAudit, useInvestigation } from '../lib/queries';
+import { StatusPill } from '../components/primitives/StatusPill';
+import { api } from '../lib/api';
 import {
-  humanizeState,
-  identityTone,
-  intakeTone,
-  investigationTone,
-  screeningTone,
-  IDENTITY_NOT_RESOLVED_DISPLAY,
-  SCREENING_NOT_RUN_DISPLAY,
-} from '../lib/status';
-import type { ReactNode } from 'react';
-import type { AuditEventOut, InvestigationOut, PersonCandidate } from '../lib/types';
+  useFindings,
+  useInvestigation,
+  useResolveEntity,
+  useReviewFinding,
+  useReviewScreening,
+  useScreening,
+  useSources,
+} from '../lib/queries';
+import { humanizeState, identityTone, investigationTone, screeningTone } from '../lib/status';
 
 const TABS = ['SUMMARY', 'FINDINGS', 'COMPANY', 'PERSON', 'SCREENING'] as const;
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+type Tab = (typeof TABS)[number];
+const when = (value: string) => new Date(value).toLocaleString();
 
 export function Investigation() {
   const { id = '' } = useParams();
   const investigation = useInvestigation(id);
-  const audit = useAudit(id);
+  const sources = useSources(id);
+  const screening = useScreening(id);
+  const findings = useFindings(id);
+  const resolve = useResolveEntity(id);
+  const reviewScreening = useReviewScreening(id);
+  const reviewFinding = useReviewFinding(id);
+  const [tab, setTab] = useState<Tab>('SUMMARY');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerSubject, setDrawerSubject] = useState('Source record');
-
-  function openEvidence(subject: string) {
-    setDrawerSubject(subject);
-    setDrawerOpen(true);
-  }
+  const [rationale, setRationale] = useState(
+    'Selected after reviewing registry identifiers and jurisdiction.',
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
 
   if (investigation.isPending) {
-    return (
-      <div className="page">
-        <LoadingState label="Loading investigation…" rows={4} />
-      </div>
-    );
+    return <div className="page"><LoadingState label="Loading investigation…" rows={4} /></div>;
   }
-
   if (investigation.isError) {
-    return (
-      <div className="page">
-        <ErrorState
-          title="Could not load the investigation"
-          message={
-            investigation.error instanceof Error
-              ? investigation.error.message
-              : 'The investigation is unavailable.'
-          }
-          onRetry={() => void investigation.refetch()}
-        />
-        <p className="page__backlink">
-          <Link to="/cases">← Back to worklist</Link>
-        </p>
-      </div>
-    );
+    return <div className="page"><ErrorState title="Could not load the investigation" message={investigation.error instanceof Error ? investigation.error.message : 'Unavailable'} onRetry={() => void investigation.refetch()} /></div>;
   }
-
   const data = investigation.data;
+
+  async function downloadReport() {
+    setActionError(null);
+    try {
+      const blob = await api.createReport(id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `sentinel-${id}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Report generation failed.');
+    }
+  }
 
   return (
     <div className="case">
-      <CaseHeader data={data} />
+      <header className="case-header">
+        <div className="case-header__identity">
+          <Fact label="Raw label" value={data.company_label} />
+          <Fact label="Resolved entity" value={data.counterparty?.legal_name ?? 'Not yet resolved'} />
+          <Fact label="Contact" value={data.contact_label} />
+        </div>
+        <div className="case-header__states">
+          <StatusPill dimension="Investigation" label={humanizeState(data.investigation_state)} tone={investigationTone(data.investigation_state)} />
+          <StatusPill dimension="Legal entity" label={humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')} tone={identityTone(data.company_identity_status)} />
+          <StatusPill dimension="Screening" label={humanizeState(data.screening_state ?? 'NOT_STARTED')} tone={screeningTone(data.screening_state)} />
+        </div>
+        <div className="case-header__actions">
+          <Button variant="primary" disabled={data.company_identity_status !== 'CONFIRMED'} onClick={() => void downloadReport()}>Final Report →</Button>
+          <Button onClick={() => setDrawerOpen(true)}>View sources</Button>
+        </div>
+        {actionError ? <p className="banner banner--error">{actionError}</p> : null}
+      </header>
 
       <nav className="tabs" aria-label="Case sections">
-        {TABS.map((tab) => {
-          const isCurrent = tab === 'SUMMARY';
-          if (isCurrent) {
-            return (
-              <span key={tab} className="tab tab--current" aria-current="page">
-                {tab}
-              </span>
-            );
-          }
-          return (
-            <span key={tab} className="tab tab--disabled" aria-disabled="true">
-              {tab}
-            </span>
-          );
-        })}
+        {TABS.map((item) => (
+          <button key={item} className={`tab ${tab === item ? 'tab--current' : ''}`} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>{item}</button>
+        ))}
       </nav>
 
       <div className="case__body">
-        <SummaryPanel data={data} onOpenEvidence={openEvidence} />
-        <AuditPanel
-          isPending={audit.isPending}
-          isError={audit.isError}
-          error={audit.error}
-          events={audit.data}
-          onRetry={() => void audit.refetch()}
-        />
+        {tab === 'SUMMARY' ? (
+          <section className="panel"><h2 className="panel__title">Summary</h2><p>Identity: {humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')}</p><p>Completeness: {humanizeState(data.completeness_state ?? 'NOT ASSESSED')}</p><p>{data.company_match_basis ?? 'No authoritative resolution has been recorded.'}</p><p><Link to="/cases">← Back to worklist</Link></p></section>
+        ) : null}
+
+        {tab === 'COMPANY' ? (
+          <section className="panel"><h2 className="panel__title">Company</h2>
+            {data.counterparty ? <dl><dt>Legal name</dt><dd>{data.counterparty.legal_name}</dd><dt>Jurisdiction / registry</dt><dd>{[data.counterparty.jurisdiction, data.counterparty.registry_id].filter(Boolean).join(' · ')}</dd><dt>Status</dt><dd>{data.counterparty.status ?? 'Not available'}</dd></dl> : <>
+              <p>Choose a registry candidate only after checking its identifiers and jurisdiction. A name match alone is not confirmation.</p>
+              <label>Resolution rationale<textarea value={rationale} onChange={(event) => setRationale(event.target.value)} /></label>
+              <div className="table-wrap"><table><thead><tr><th>Legal entity</th><th>Registry details</th><th>Source / retrieved</th><th>Action</th></tr></thead><tbody>
+                {data.entity_candidates.map((candidate) => <tr key={candidate.entity_candidate_id}><td>{candidate.legal_name}<br /><span className="cell-muted">{candidate.registered_address ?? 'Address unavailable'}</span></td><td>{candidate.jurisdiction ?? '—'} · {candidate.registry_id ?? 'no identifier'}<br />{candidate.legal_status ?? 'status unavailable'}<br />{candidate.match_basis}</td><td>{candidate.provider}<br />{when(candidate.retrieved_at)}</td><td><Button disabled={!candidate.registry_id || !candidate.jurisdiction || resolve.isPending} onClick={() => resolve.mutate({ candidateId: candidate.entity_candidate_id, rationale })}>Select entity</Button></td></tr>)}
+                {data.entity_candidates.length === 0 ? <tr><td colSpan={4}>No registry candidates were found.</td></tr> : null}
+              </tbody></table></div>
+            </>}
+          </section>
+        ) : null}
+
+        {tab === 'PERSON' ? <section className="panel"><h2 className="panel__title">Person</h2>{data.candidates.map((candidate) => <article key={candidate.candidate_id}><h3>{candidate.label_fragment}</h3><p>{humanizeState(candidate.relationship_state ?? 'UNVERIFIED')}</p><p>{candidate.match_basis ?? 'No authoritative relationship evidence retained.'}</p></article>)}</section> : null}
+
+        {tab === 'SCREENING' ? <section className="panel"><h2 className="panel__title">Screening</h2>{screening.data?.map((item) => <article key={item.screening_result_id}><h3>{item.subject_label} — {item.matched_profile_id ?? 'Result'}</h3><p>{item.match_basis} {item.match_score === null ? '' : `(score ${item.match_score})`}</p><p>Lists: {item.list_or_source}</p><p>Disposition: {item.analyst_disposition ?? 'Pending review'}</p><Button onClick={() => reviewScreening.mutate({ resultId: item.screening_result_id, disposition: 'FALSE_POSITIVE', rationale: 'Analyst reviewed the identifiers and determined this is not the subject.' })}>Mark false positive</Button> <Button onClick={() => reviewScreening.mutate({ resultId: item.screening_result_id, disposition: 'CONFIRMED_MATCH', rationale: 'Analyst corroborated the matched identifiers against retained evidence.' })}>Confirm match</Button></article>)}{screening.data?.length === 0 ? <p>No potential matches returned.</p> : null}</section> : null}
+
+        {tab === 'FINDINGS' ? <section className="panel"><h2 className="panel__title">Findings</h2>{findings.data?.map((item) => <article key={item.finding_id}><h3>{item.title}</h3><p>{item.assessment_text}</p><p><strong>Evidence:</strong> {item.evidence_text}</p><p><strong>Action:</strong> {item.action_text}</p><p>Review: {item.review_status}</p><Button onClick={() => reviewFinding.mutate({ findingId: item.finding_id, disposition: 'CONFIRMED', rationale: 'Analyst reviewed the linked evidence and confirms this finding.' })}>Confirm</Button> <Button onClick={() => reviewFinding.mutate({ findingId: item.finding_id, disposition: 'DISMISSED', rationale: 'Analyst reviewed the linked evidence and dismisses this finding.' })}>Dismiss</Button></article>)}</section> : null}
       </div>
 
-      <EvidenceDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Evidence"
-      >
-        <p className="drawer-panel__empty">No evidence is available for {drawerSubject} yet.</p>
+      <EvidenceDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Sources and provenance">
+        {sources.isPending ? <LoadingState label="Loading sources…" rows={3} /> : sources.data?.map((source) => <article key={source.source_id}><h3>{source.title}</h3><p>{source.source_class} · retrieved {when(source.retrieved_at)}</p>{source.origin_ref ? <p><a href={source.origin_ref} target="_blank" rel="noreferrer">Open source</a></p> : null}<p>{source.limitations}</p></article>)}
+        {sources.data?.length === 0 ? <p>No sources retained yet.</p> : null}
       </EvidenceDrawer>
     </div>
   );
 }
 
-function CaseHeader({ data }: { data: InvestigationOut }) {
-  const resolved = data.counterparty;
-  const identityConfirmed = data.company_identity_status === 'CONFIRMED';
-  // Two independent gates: the legal entity must be confirmed (identity gate),
-  // and the report workflow must exist (availability gate). The report is not
-  // available yet, so the control stays disabled and never does nothing.
-  const reportReason = identityConfirmed
-    ? 'Final Report is not yet available.'
-    : 'Final Report opens once the legal entity is confirmed.';
-
-  return (
-    <header className="case-header">
-      <div className="case-header__identity">
-        <div className="labelled">
-          <span className="labelled__label">Raw label</span>
-          <span className="labelled__value">{data.company_label}</span>
-        </div>
-        <div className="labelled">
-          <span className="labelled__label">Resolved entity</span>
-          {resolved ? (
-            <span className="labelled__value">
-              {resolved.legal_name}
-              <span className="labelled__detail mono">
-                {[resolved.jurisdiction, resolved.registry_class, resolved.registry_id]
-                  .filter(Boolean)
-                  .join(' · ') || '—'}
-              </span>
-            </span>
-          ) : (
-            <span className="labelled__value cell-muted">Not yet resolved</span>
-          )}
-        </div>
-        <div className="labelled">
-          <span className="labelled__label">Contact (raw label)</span>
-          <span className="labelled__value">{data.contact_label}</span>
-        </div>
-      </div>
-
-      <div className="case-header__states">
-        <StatusPill
-          dimension="Intake"
-          label={humanizeState(data.intake_state)}
-          tone={intakeTone(data.intake_state)}
-        />
-        <StatusPill
-          dimension="Investigation"
-          label={humanizeState(data.investigation_state)}
-          tone={investigationTone(data.investigation_state)}
-        />
-        <StatusPill
-          dimension="Legal entity"
-          label={
-            data.company_identity_status
-              ? humanizeState(data.company_identity_status)
-              : IDENTITY_NOT_RESOLVED_DISPLAY
-          }
-          tone={identityTone(data.company_identity_status)}
-        />
-        <StatusPill
-          dimension="Screening"
-          label={data.screening_state ? humanizeState(data.screening_state) : SCREENING_NOT_RUN_DISPLAY}
-          tone={screeningTone(data.screening_state)}
-        />
-      </div>
-
-      <div className="case-header__actions">
-        <Button variant="primary" disabled aria-disabled title={reportReason}>
-          Final Report →
-        </Button>
-        <span className="case-header__gate-reason">{reportReason}</span>
-      </div>
-    </header>
-  );
-}
-
-function SummaryPanel({
-  data,
-  onOpenEvidence,
-}: {
-  data: InvestigationOut;
-  onOpenEvidence: (subject: string) => void;
-}) {
-  return (
-    <section className="panel" aria-labelledby="summary-heading">
-      <h2 className="panel__title" id="summary-heading">
-        Summary
-      </h2>
-
-      {data.intake_state === 'CLARIFICATION_REQUIRED' && data.clarification_reason ? (
-        <div className="banner banner--caution" role="note">
-          <span className="banner__glyph" aria-hidden="true">
-            ◆
-          </span>
-          <div>
-            <p className="banner__title">Clarification required — discovery not started</p>
-            <p className="banner__body">{data.clarification_reason}</p>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="summary-grid">
-        <SummaryRow label="Intake">
-          <StatusPill label={humanizeState(data.intake_state)} tone={intakeTone(data.intake_state)} />
-        </SummaryRow>
-        <SummaryRow label="Investigation">
-          <StatusPill
-            label={humanizeState(data.investigation_state)}
-            tone={investigationTone(data.investigation_state)}
-          />
-        </SummaryRow>
-        <SummaryRow label="Legal entity">
-          {data.company_identity_status ? (
-            <StatusPill
-              label={humanizeState(data.company_identity_status)}
-              tone={identityTone(data.company_identity_status)}
-            />
-          ) : (
-            <span className="cell-muted">{IDENTITY_NOT_RESOLVED_DISPLAY}</span>
-          )}
-          {data.company_match_basis ? (
-            <span className="summary-row__note">Why matched: {data.company_match_basis}</span>
-          ) : null}
-        </SummaryRow>
-        <SummaryRow label="Completeness">
-          <span>{data.completeness_state ? humanizeState(data.completeness_state) : '—'}</span>
-        </SummaryRow>
-        <SummaryRow label="Screening">
-          {data.screening_state ? (
-            <StatusPill
-              label={humanizeState(data.screening_state)}
-              tone={screeningTone(data.screening_state)}
-            />
-          ) : (
-            <span className="cell-muted">{SCREENING_NOT_RUN_DISPLAY}</span>
-          )}
-        </SummaryRow>
-      </div>
-
-      <h3 className="panel__subhead">
-        Person candidates
-        <span className="panel__subhead-count">
-          {data.candidates.length} derived — each assessed independently
-        </span>
-      </h3>
-      {data.candidates.length === 0 ? (
-        <p className="cell-muted">No person candidate could be derived from the contact label.</p>
-      ) : (
-        <ul className="candidate-list">
-          {data.candidates.map((candidate) => (
-            <CandidateCard
-              key={candidate.candidate_id}
-              candidate={candidate}
-              onOpenEvidence={onOpenEvidence}
-            />
-          ))}
-        </ul>
-      )}
-
-      <div className="panel__actions">
-        <Button variant="secondary" onClick={() => onOpenEvidence('All sources')}>
-          Open evidence drawer
-        </Button>
-      </div>
-    </section>
-  );
-}
-
-function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="summary-row">
-      <span className="summary-row__label">{label}</span>
-      <span className="summary-row__value">{children}</span>
-    </div>
-  );
-}
-
-function CandidateCard({
-  candidate,
-  onOpenEvidence,
-}: {
-  candidate: PersonCandidate;
-  onOpenEvidence: (subject: string) => void;
-}) {
-  return (
-    <li className="candidate">
-      <div className="candidate__head">
-        <span className="candidate__fragment">
-          from “{candidate.label_fragment}”
-        </span>
-      </div>
-      {candidate.match_basis ? (
-        <p className="candidate__basis">Why matched: {candidate.match_basis}</p>
-      ) : null}
-      <div className="candidate__states">
-        <span className="candidate__state-group">
-          <span className="candidate__state-label">Person evidence</span>
-          <span>
-            {candidate.person_evidence_status
-              ? humanizeState(candidate.person_evidence_status)
-              : '—'}
-          </span>
-        </span>
-        <span className="candidate__state-group">
-          <span className="candidate__state-label">Relationship</span>
-          <span>
-            {candidate.relationship_state ? humanizeState(candidate.relationship_state) : '—'}
-          </span>
-        </span>
-      </div>
-      <button
-        type="button"
-        className="link-button"
-        onClick={() => onOpenEvidence(`Candidate “${candidate.label_fragment}”`)}
-      >
-        Evidence ▸
-      </button>
-    </li>
-  );
-}
-
-function AuditPanel({
-  isPending,
-  isError,
-  error,
-  events,
-  onRetry,
-}: {
-  isPending: boolean;
-  isError: boolean;
-  error: unknown;
-  events: AuditEventOut[] | undefined;
-  onRetry: () => void;
-}) {
-  return (
-    <section className="panel panel--aside" aria-labelledby="audit-heading">
-      <h2 className="panel__title" id="audit-heading">
-        Audit &amp; history
-      </h2>
-      {isPending ? (
-        <LoadingState label="Loading history…" rows={3} />
-      ) : isError ? (
-        <ErrorState
-          title="Could not load history"
-          message={error instanceof Error ? error.message : 'History is unavailable.'}
-          onRetry={onRetry}
-        />
-      ) : !events || events.length === 0 ? (
-        <p className="cell-muted">No recorded events yet.</p>
-      ) : (
-        <ol className="timeline">
-          {events.map((event) => (
-            <li key={event.event_id} className="timeline__item">
-              <div className="timeline__meta">
-                <span className="timeline__action">{event.action}</span>
-                <time className="mono timeline__time">{formatWhen(event.created_at)}</time>
-              </div>
-              <p className="timeline__detail">
-                <span className="timeline__actor">{event.actor}</span>
-                <span className="cell-muted"> · {event.object_type}</span>
-                {event.target_ref ? <span className="mono"> · {event.target_ref}</span> : null}
-              </p>
-              {event.rationale ? <p className="timeline__rationale">{event.rationale}</p> : null}
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  );
+function Fact({ label, value }: { label: string; value: string }) {
+  return <div className="labelled"><span className="labelled__label">{label}</span><span className="labelled__value">{value}</span></div>;
 }
