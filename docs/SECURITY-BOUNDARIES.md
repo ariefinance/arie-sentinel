@@ -62,15 +62,17 @@ This repository is **public during development**. Never commit:
   committed to the repo or used as fixtures.
 
 **Repository visibility:** PUBLIC by owner decision during development / review;
-privacy is not a blocker, but public-repo **data hygiene** — no real ARIE,
-counterparty, or management-derived data, **fictional fixtures only**
+privacy is not a blocker, but public-repo **data hygiene** — no real ARIE operational,
+counterparty, or management-derived data; fictional fixtures plus explicitly approved,
+non-sensitive public validation references only
 (`EXAMPLE-FIXTURES.md`) — is mandatory.
 
 Controls:
 
 - `.env.example` contains **placeholders only**; real `.env` is git-ignored.
-- All sample entities/data in docs, fixtures, and tests are **fictional**
-  (use `.test`/`.example` domains, invented names).
+- Workflow samples are **fictional** (`.test`/`.example` domains, invented names).
+  Any public validation case must be explicitly documented, independently sourced,
+  non-sensitive, company-only, and contain no internal or operational data.
 - Secret scanning enabled; a pre-commit secret check recommended
   (`CONTRIBUTING.md`).
 - No configuration that reveals internal topology.

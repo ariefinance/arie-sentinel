@@ -16,4 +16,4 @@ table_names = ", ".join(
 with engine.begin() as connection:
     connection.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
 
-print("Reset the fictional management-demo dataset.")
+print("Reset the non-live management-demo dataset.")

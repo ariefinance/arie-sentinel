@@ -1,4 +1,10 @@
-# Example Fixtures (canonical, fictional)
+# Management-demo data (canonical)
+
+The management demo contains two clearly distinguished categories:
+
+- **Fictional Test Case** — invented organisations and people used to exercise workflow states.
+- **Public Validation Case** — a real organisation represented only by independently public,
+  non-sensitive references. It is not an ARIE operational case and contains no staff contact.
 
 ## Management-demo commodities scenarios
 
@@ -20,13 +26,28 @@ counterparties.
 **Status:** Canonical. This is the **single** set of example data used across all
 Sentinel documentation, wireframes, and (later) tests.
 
-**Hard rule (public repo).** Every example in this repository is **fictional and
-invented**. No real ARIE client, counterparty, prospect, contact, or
+**Hard rule (public repo).** Every workflow fixture in this repository is **fictional and
+invented**, except the explicitly documented ARIE Finance public validation case below. No
+real ARIE client, counterparty, prospect, contact, or
 management-derived label may appear in any document, fixture, or test. "No
 secrets" is **not** the same as "no real operational data" — real
 management-derived labels are operational data and are prohibited here
-(`SECURITY-BOUNDARIES.md`). Any resemblance to a real organisation or person is
-coincidental. Use only `.test` / `.example` domains.
+(`SECURITY-BOUNDARIES.md`). Fictional cases use only `.test` / `.example` domains.
+
+## Public validation case — ARIE Finance
+
+`ARIE Finance` and `ARIE Finance Ltd` resolve to the same company-only validation case.
+The fixture retains only these public references:
+
+- the Mauritius corporate registry publication that identifies **ARIE Finance Ltd** with
+  registration identifier **C221997**;
+- the organisation's public website; and
+- the Financial Services Commission Mauritius codified list identifying FS-2.9 as the
+  Payment Intermediary Services licence class.
+
+The website's licence statement remains explicitly company-controlled, and the codified list
+does not independently establish that ARIE Finance currently holds that licence. No contact,
+private director/shareholder data, internal address, email, transaction, or client data is stored.
 
 If you need a new example, extend this set rather than inventing ad-hoc names, so
 the documentation stays coherent and auditable.

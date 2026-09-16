@@ -1,13 +1,17 @@
-"""Fictional-fixture discipline — enforced by an ALLOW-LIST, never a denylist.
+"""Demo-data discipline — fictional fixtures plus one documented public case.
 
 We deliberately do not embed any real/management-derived label here (a denylist
 would itself reintroduce that operational data). Instead we assert that the
-fixtures only ever emit the canonical invented names from docs/EXAMPLE-FIXTURES.md.
+fictional fixtures only emit the canonical invented names. ARIE Finance is the
+sole public validation record and is tested separately against public references.
 Secret scanning (gitleaks) and the committed-data guard live in CI.
 """
 
 from __future__ import annotations
 
+import pytest
+
+from arie_sentinel.providers import DemoDatasetUnsupported
 from arie_sentinel.providers.fixtures import build_fixture_providers
 
 # The ONLY entity name-stems permitted anywhere in fixtures/tests/examples.
@@ -34,11 +38,27 @@ def test_registry_fixtures_emit_only_canonical_names() -> None:
         "Atlas Global Fuels",
         "Northstar Petroleum Trading",
         "Meridian Energy Supplies Ltd",
-        "unknown co",
     ]
     for label in labels:
         for cand in reg.discover_candidates(label):
             assert cand.legal_name.startswith(ALLOWED_NAME_STEMS), cand.legal_name
+
+
+@pytest.mark.parametrize("label", ["ARIE Finance", "ARIE Finance Ltd"])
+def test_public_validation_case_is_explicit_and_sourced(label: str) -> None:
+    candidates = build_fixture_providers().registry.discover_candidates(label)
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.legal_name == "ARIE Finance Ltd"
+    assert candidate.jurisdiction == "MU"
+    assert candidate.registry_id == "C221997"
+    assert candidate.source_ref is not None
+    assert candidate.source_ref.startswith("https://companies.govmu.org/")
+
+
+def test_unknown_company_fails_with_explicit_demo_limitation() -> None:
+    with pytest.raises(DemoDatasetUnsupported, match="management-demo dataset"):
+        build_fixture_providers().registry.discover_candidates("Unknown Example Holdings")
 
 
 def test_domain_fixture_uses_canonical_test_domain() -> None:

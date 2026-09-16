@@ -10,6 +10,7 @@ const investigation = {
   investigation_id: 'case-1',
   company_label: 'Example Public Company',
   contact_label: 'Example Public Person',
+  case_type: null,
   intake_state: 'SUFFICIENT_FOR_DISCOVERY',
   clarification_reason: null,
   investigation_state: 'COMPLETED',
@@ -159,3 +160,79 @@ test.each([
     expect(await screen.findByText(message)).toBeInTheDocument();
   },
 );
+
+test('shows no person assessment when no contact was supplied', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
+      return new Response('[]');
+    }
+    return new Response(
+      JSON.stringify({
+        ...investigation,
+        contact_label: '',
+        candidates: [],
+        company_identity_status: 'CONFIRMED',
+      }),
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('No contact supplied')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'PERSON' }));
+  expect(
+    await screen.findByText(
+      (_content, element) =>
+        element?.tagName === 'P' &&
+        element.textContent?.includes('Named contact: Not supplied') === true &&
+        element.textContent?.includes('Person relationship: Not assessed') === true,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('Unverified')).not.toBeInTheDocument();
+});
+
+test('labels an unsupported demo company as not searched', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
+      return new Response('[]');
+    }
+    return new Response(
+      JSON.stringify({
+        ...investigation,
+        company_label: 'Unknown Example Holdings',
+        contact_label: '',
+        candidates: [],
+        entity_candidates: [],
+        investigation_state: 'SOURCE_UNAVAILABLE',
+        company_identity_status: null,
+        clarification_reason:
+          'Not available in the management-demo dataset. Live registry/provider search is disabled.',
+      }),
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(
+    await screen.findByText('Not available in the management-demo dataset'),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText('Not searched').length).toBeGreaterThan(0);
+});

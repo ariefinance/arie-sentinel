@@ -23,7 +23,7 @@ from .models.enums import (
 
 class CreateInvestigationRequest(BaseModel):
     company_label: str = Field(min_length=1, max_length=512)
-    contact_label: str = Field(min_length=1, max_length=512)
+    contact_label: str = Field(default="", max_length=512)
 
 
 class PersonCandidateOut(BaseModel):
@@ -73,6 +73,7 @@ class InvestigationOut(BaseModel):
     investigation_id: uuid.UUID
     company_label: str
     contact_label: str
+    case_type: str | None = None
     intake_state: IntakeState
     clarification_reason: str | None
     investigation_state: InvestigationState
@@ -93,6 +94,7 @@ class WorklistItem(BaseModel):
     investigation_id: uuid.UUID
     company_label: str
     contact_label: str
+    case_type: str | None = None
     intake_state: IntakeState
     investigation_state: InvestigationState
     company_identity_status: CompanyIdentityStatus | None

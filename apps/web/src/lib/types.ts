@@ -9,12 +9,7 @@ export type Role = 'analyst' | 'manager';
 export type IntakeState = 'SUFFICIENT_FOR_DISCOVERY' | 'CLARIFICATION_REQUIRED';
 
 export type InvestigationState =
-  | 'NOT_STARTED'
-  | 'RUNNING'
-  | 'PARTIAL_RESULTS'
-  | 'SOURCE_UNAVAILABLE'
-  | 'COMPLETED'
-  | 'FAILED';
+  'NOT_STARTED' | 'RUNNING' | 'PARTIAL_RESULTS' | 'SOURCE_UNAVAILABLE' | 'COMPLETED' | 'FAILED';
 
 export type CompanyIdentityStatus = 'CONFIRMED' | 'AMBIGUOUS' | 'NOT_VERIFIED' | null;
 
@@ -70,6 +65,7 @@ export interface InvestigationOut {
   investigation_id: string;
   company_label: string;
   contact_label: string;
+  case_type: string | null;
   intake_state: IntakeState;
   clarification_reason: string | null;
   investigation_state: InvestigationState;
@@ -88,6 +84,7 @@ export interface WorklistItem {
   investigation_id: string;
   company_label: string;
   contact_label: string;
+  case_type: string | null;
   intake_state: IntakeState;
   investigation_state: InvestigationState;
   company_identity_status: CompanyIdentityStatus;
@@ -114,7 +111,7 @@ export interface HealthOut {
 
 export interface CreateInvestigationBody {
   company_label: string;
-  contact_label: string;
+  contact_label?: string;
 }
 
 export interface SourceOut {

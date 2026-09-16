@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..config import get_settings
+from ..demo_cases import PUBLIC_VALIDATION_CASE, demo_case_context
 from ..intake.gate import assess_intake
 from ..models.core import Counterparty, EntityCandidate, Identifier, Investigation, PersonCandidate
 from ..models.enums import (
@@ -40,7 +41,7 @@ from ..models.enums import (
 )
 from ..models.evidence import Evidence, Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent, Job
-from ..providers import ProviderUnavailable
+from ..providers import DemoDatasetUnsupported, ProviderUnavailable
 from ..providers.base import CandidateEntity, ScreeningSubject
 from ..providers.factory import Providers, build_providers
 from ..providers.normalization import normalize_entity_name
@@ -113,15 +114,20 @@ def create_investigation(
     source_row_ref: str | None = None,
 ) -> Investigation:
     """Create one Investigation, run the intake gate, and enqueue discovery when sufficient."""
-    assessment = assess_intake(company_label, contact_label)
+    normalized_contact = contact_label or ""
+    assessment = assess_intake(company_label, normalized_contact)
+    stored_context = dict(case_context or {})
+    if get_settings().provider_mode == "fixture":
+        for key, value in demo_case_context(company_label).items():
+            stored_context.setdefault(key, value)
 
     investigation = Investigation(
         company_label=company_label,
-        contact_label=contact_label,
+        contact_label=normalized_contact,
         intake_state=assessment.state,
         clarification_reason=assessment.reason,
         investigation_state=InvestigationState.NOT_STARTED,
-        case_context=case_context,
+        case_context=stored_context or None,
         import_batch_id=import_batch_id,
         source_row_ref=source_row_ref,
         created_by=actor,
@@ -181,6 +187,21 @@ def run_discovery(
 
     try:
         candidates = providers.registry.discover_candidates(inv.company_label)
+    except DemoDatasetUnsupported as exc:
+        inv.investigation_state = InvestigationState.SOURCE_UNAVAILABLE
+        inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        inv.company_identity_status = None
+        inv.clarification_reason = str(exc)
+        record_audit(
+            session,
+            actor="adapter:demo_registry",
+            action=AuditAction.STATE_CHANGE,
+            object_type="investigation",
+            investigation_id=inv.investigation_id,
+            rationale=str(exc),
+            payload={"investigation_state": inv.investigation_state.value},
+        )
+        return
     except ProviderUnavailable as exc:
         inv.investigation_state = InvestigationState.SOURCE_UNAVAILABLE
         inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
@@ -215,15 +236,30 @@ def run_discovery(
             match_basis=candidate.match_basis,
         )
         session.add(stored)
+        is_public_validation = (inv.case_context or {}).get(
+            "demo_case_type"
+        ) == PUBLIC_VALIDATION_CASE
         source = Source(
             investigation_id=inv.investigation_id,
             source_class=SourceClass.CORPORATE_REGISTRY,
             title=f"Registry candidate: {candidate.legal_name}",
             origin_ref=candidate.source_ref,
             retrieved_at=retrieved_at,
-            captured_by="adapter:corporate_registry",
-            limitations="Search result is a candidate until authoritative resolution.",
-            license_class="provider-normalized",
+            captured_by=(
+                "adapter:public_validation_registry"
+                if is_public_validation
+                else "adapter:corporate_registry"
+            ),
+            limitations=(
+                "Official public listing confirms the legal name and registration identifier; "
+                "it does not state current legal or regulatory status. Analyst resolution is "
+                "still required."
+                if is_public_validation
+                else "Search result is a candidate until authoritative resolution."
+            ),
+            license_class=(
+                "public-government-source" if is_public_validation else "provider-normalized"
+            ),
         )
         session.add(source)
         session.flush()
@@ -420,6 +456,8 @@ def _corroborate_contact(
     entity: EntityCandidate,
     providers: Providers | Any,
 ) -> None:
+    if not investigation.candidates:
+        return
     registry = providers.registry
     discover_officers = getattr(registry, "discover_officers", None)
     if discover_officers is None or not entity.jurisdiction or not entity.registry_id:
@@ -626,14 +664,15 @@ def _run_public_intelligence(
     session: Session, inv: Investigation, providers: Providers | Any
 ) -> None:
     company = inv.counterparty.legal_name if inv.counterparty else inv.company_label
-    contact = inv.contact_label
+    contact = inv.contact_label.strip()
     queries = [
         f'"{company}"',
-        f'"{company}" "{contact}"',
         f'"{company}" regulator',
         f'"{company}" lawsuit',
         f'"{company}" fraud',
     ]
+    if contact:
+        queries.insert(1, f'"{company}" "{contact}"')
     seen: set[str] = set()
     evidence_ids: list[uuid.UUID] = []
     try:
@@ -751,6 +790,8 @@ def _run_public_intelligence(
         if candidate.relationship_state is not RelationshipState.VERIFIED:
             candidate.relationship_state = RelationshipState.UNVERIFIED
             candidate.match_basis = "No authoritative company-person link was established."
+    if not inv.candidates:
+        return
     if any(c.relationship_state is RelationshipState.VERIFIED for c in inv.candidates):
         return
     session.add(

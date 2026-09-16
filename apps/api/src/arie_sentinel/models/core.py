@@ -149,6 +149,12 @@ class Investigation(Base, TimestampMixin):
         back_populates="investigation", cascade="all, delete-orphan"
     )
 
+    @property
+    def case_type(self) -> str | None:
+        """Non-evidentiary management-demo label, when one was assigned."""
+        value = (self.case_context or {}).get("demo_case_type")
+        return value if isinstance(value, str) else None
+
     __table_args__ = (
         # A row is identified by (batch, source row index) — NOT by label content.
         # This makes re-processing a batch idempotent while allowing two rows with

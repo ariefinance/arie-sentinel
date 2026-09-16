@@ -23,6 +23,12 @@ interface FilterDef {
   empty: string;
 }
 
+const caseTypeLabel = (value: string | null): string | null => {
+  if (value === 'PUBLIC_VALIDATION_CASE') return 'Public Validation Case';
+  if (value === 'FICTIONAL_TEST_CASE') return 'Fictional Test Case';
+  return null;
+};
+
 // Every filter is a view over a canonical state; the worklist coins none of its
 // own (UI-UX-SPEC.md §1b).
 const FILTERS: FilterDef[] = [
@@ -74,12 +80,21 @@ export function Cases() {
       key: 'company_label',
       header: 'Raw label',
       isRowHeader: true,
-      render: (row) => <span className="cell-strong">{row.company_label}</span>,
+      render: (row) => (
+        <span className="cell-strong">
+          {row.company_label}
+          {caseTypeLabel(row.case_type) ? (
+            <small className="case-type">{caseTypeLabel(row.case_type)}</small>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: 'contact_label',
       header: 'Contact (raw)',
-      render: (row) => <span className="cell-muted">{row.contact_label}</span>,
+      render: (row) => (
+        <span className="cell-muted">{row.contact_label.trim() || 'No contact supplied'}</span>
+      ),
     },
     {
       key: 'investigation_state',
@@ -184,7 +199,8 @@ export function Cases() {
         ) : (
           <>
             <p className="page__count">
-              {worklist.data.length} {worklist.data.length === 1 ? 'investigation' : 'investigations'}
+              {worklist.data.length}{' '}
+              {worklist.data.length === 1 ? 'investigation' : 'investigations'}
             </p>
             <Table
               caption={`Investigations — ${activeDef.label}`}

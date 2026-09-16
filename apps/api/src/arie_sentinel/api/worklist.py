@@ -70,6 +70,7 @@ def list_worklist(
             investigation_id=inv.investigation_id,
             company_label=inv.company_label,
             contact_label=inv.contact_label,
+            case_type=inv.case_type,
             intake_state=inv.intake_state,
             investigation_state=inv.investigation_state,
             company_identity_status=inv.company_identity_status,
