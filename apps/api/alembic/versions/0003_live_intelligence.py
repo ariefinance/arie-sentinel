@@ -15,15 +15,6 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("auditaction", "audit_event", type_="check")
-    op.create_check_constraint(
-        "auditaction",
-        "audit_event",
-        "action IN ('INVESTIGATION_CREATED','REQUEST_CLARIFICATION','CLARIFICATION_SUPPLIED',"
-        "'RESOLVE_IDENTITY','LINK_COUNTERPARTY','CONFIRM_FINDING','DISMISS_FINDING',"
-        "'REQUEST_INFORMATION','ADD_NOTE','FINALISE_REPORT','STATE_CHANGE',"
-        "'IMPORT_BATCH_CREATED','REVIEW_SCREENING','REVIEW_FINDING')",
-    )
     op.create_table(
         "entity_candidate",
         sa.Column("entity_candidate_id", sa.Uuid(), nullable=False),
@@ -41,8 +32,12 @@ def upgrade() -> None:
         sa.Column("source_ref", sa.Text()),
         sa.Column("retrieved_at", sa.DateTime(), nullable=False),
         sa.Column("match_basis", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.ForeignKeyConstraint(["investigation_id"], ["investigation.investigation_id"]),
         sa.PrimaryKeyConstraint("entity_candidate_id"),
     )
@@ -81,12 +76,3 @@ def downgrade() -> None:
     op.drop_column("screening_result", "match_score")
     op.drop_column("screening_result", "matched_profile_id")
     op.drop_table("entity_candidate")
-    op.drop_constraint("auditaction", "audit_event", type_="check")
-    op.create_check_constraint(
-        "auditaction",
-        "audit_event",
-        "action IN ('INVESTIGATION_CREATED','REQUEST_CLARIFICATION','CLARIFICATION_SUPPLIED',"
-        "'RESOLVE_IDENTITY','LINK_COUNTERPARTY','CONFIRM_FINDING','DISMISS_FINDING',"
-        "'REQUEST_INFORMATION','ADD_NOTE','FINALISE_REPORT','STATE_CHANGE',"
-        "'IMPORT_BATCH_CREATED')",
-    )
