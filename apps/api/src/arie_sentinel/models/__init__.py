@@ -5,6 +5,7 @@ from __future__ import annotations
 from .base import Base
 from .core import (
     Counterparty,
+    EntityCandidate,
     Identifier,
     ImportBatch,
     Investigation,
@@ -27,6 +28,7 @@ __all__ = [
     "Base",
     "Investigation",
     "Counterparty",
+    "EntityCandidate",
     "Person",
     "PersonCandidate",
     "Identifier",

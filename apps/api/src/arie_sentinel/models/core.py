@@ -145,6 +145,9 @@ class Investigation(Base, TimestampMixin):
     candidates: Mapped[list[PersonCandidate]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan"
     )
+    entity_candidates: Mapped[list[EntityCandidate]] = relationship(
+        back_populates="investigation", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         # A row is identified by (batch, source row index) — NOT by label content.
@@ -173,6 +176,32 @@ class PersonCandidate(Base, TimestampMixin):
     created_by: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
 
     investigation: Mapped[Investigation] = relationship(back_populates="candidates")
+
+
+class EntityCandidate(Base, TimestampMixin):
+    """Persisted company-search result awaiting authoritative analyst resolution."""
+
+    __tablename__ = "entity_candidate"
+
+    entity_candidate_id: Mapped[uuid.UUID] = uuid_pk()
+    investigation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("investigation.investigation_id"), nullable=False
+    )
+    legal_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    jurisdiction: Mapped[str | None] = mapped_column(String(64))
+    registry_class: Mapped[str | None] = mapped_column(String(64))
+    registry_id: Mapped[str | None] = mapped_column(String(128))
+    legal_status: Mapped[str | None] = mapped_column(String(64))
+    registered_address: Mapped[str | None] = mapped_column(Text)
+    incorporation_date: Mapped[str | None] = mapped_column(String(32))
+    lei: Mapped[str | None] = mapped_column(String(20))
+    alternative_names: Mapped[list[str] | None] = mapped_column(JSONB)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(Text)
+    retrieved_at: Mapped[datetime] = mapped_column(nullable=False)
+    match_basis: Mapped[str | None] = mapped_column(Text)
+
+    investigation: Mapped[Investigation] = relationship(back_populates="entity_candidates")
 
 
 class Identifier(Base, TimestampMixin):

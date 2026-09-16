@@ -16,6 +16,7 @@ from .base import (
     DomainRecord,
     ProviderUnavailable,
     ScreeningHit,
+    ScreeningSubject,
     WebResult,
 )
 
@@ -78,7 +79,8 @@ class FixtureCorporateRegistryProvider:
 
 
 class FixtureScreeningProvider:
-    def screen(self, subject_label: str) -> list[ScreeningHit]:
+    def screen(self, subject: ScreeningSubject | str) -> list[ScreeningHit]:
+        subject_label = subject.label if isinstance(subject, ScreeningSubject) else subject
         norm = normalise_label(subject_label)
         hits: list[ScreeningHit] = []
         if "amara" in norm:  # scenario S9: PEP potential match requiring review

@@ -153,6 +153,13 @@ class ScreeningResult(Base, TimestampMixin):
     provider_event_group: Mapped[str | None] = mapped_column(String(128))
     article_count: Mapped[int | None] = mapped_column()
     source_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("source.source_id"))
+    matched_profile_id: Mapped[str | None] = mapped_column(String(256))
+    match_score: Mapped[float | None] = mapped_column()
+    match_explanation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    matched_identifiers: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    datasets: Mapped[list[str] | None] = mapped_column(JSONB)
+    analyst_disposition: Mapped[str | None] = mapped_column(String(32))
+    analyst_rationale: Mapped[str | None] = mapped_column(Text)
 
 
 class AnalystDecision(Base):
