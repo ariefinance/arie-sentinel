@@ -225,4 +225,5 @@ jobs:
         if: always()
         env:
           POSTGRES_PASSWORD: ci-placeholder-only
+          BASIC_AUTH_HTPASSWD: "sentinel-demo:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M="
         run: docker compose -f compose.pilot.yml down -v --remove-orphans
