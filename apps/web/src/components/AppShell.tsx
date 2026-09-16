@@ -2,6 +2,8 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { DEV_ROLE } from '../lib/api';
 import { useHealth } from '../lib/queries';
 
+const DEMO_LABEL = import.meta.env.VITE_DEMO_LABEL as string | undefined;
+
 /**
  * Institutional application shell: a quiet top bar with the product wordmark,
  * primary navigation, and a dev role indicator. Branding is restrained
@@ -21,6 +23,7 @@ export function AppShell() {
             <span className="topbar__wordmark">ARIE</span>
             <span className="topbar__product">Sentinel</span>
             <span className="topbar__tagline">Counterparty Integrity</span>
+            {DEMO_LABEL ? <span className="demo-label">{DEMO_LABEL}</span> : null}
           </div>
 
           <nav className="topbar__nav" aria-label="Primary">

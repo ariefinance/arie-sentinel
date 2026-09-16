@@ -52,6 +52,16 @@
   padding-left: var(--space-8);
 }
 
+.demo-label {
+  font-size: var(--text-label);
+  color: var(--attention);
+  background: var(--attention-bg);
+  border: 1px solid var(--attention);
+  border-radius: var(--radius-md);
+  padding: 2px var(--space-8);
+  white-space: nowrap;
+}
+
 .topbar__nav {
   display: flex;
   gap: var(--space-4);

@@ -203,13 +203,16 @@ jobs:
 
           proxy_ready=false
           for attempt in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:8080/api/health; then
+            if curl --fail --silent --show-error --user sentinel-demo:test \
+              http://127.0.0.1:8080/api/health; then
               proxy_ready=true
               break
             fi
             sleep 2
           done
           "$proxy_ready"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:8080/api/health)" = "401"
 
       - name: Clean up packaged stack
         if: always()
