@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +55,28 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.env.lower() in {"production", "prod"}
+
+    @model_validator(mode="after")
+    def validate_production_safety(self) -> Settings:
+        """Reject development or incomplete identity settings in production."""
+        if not self.is_production:
+            return self
+        errors: list[str] = []
+        if self.dev_auth:
+            errors.append("ARIE_DEV_AUTH must be false")
+        if self.provider_mode != "live":
+            errors.append("ARIE_PROVIDER_MODE must be live")
+        if self.database_url == "postgresql+psycopg://arie:arie@localhost:5432/arie_sentinel":
+            errors.append("ARIE_DATABASE_URL must not use the development default")
+        if not self.oidc_issuer:
+            errors.append("ARIE_OIDC_ISSUER is required")
+        if not self.oidc_audience:
+            errors.append("ARIE_OIDC_AUDIENCE is required")
+        if not self.oidc_jwks_url:
+            errors.append("ARIE_OIDC_JWKS_URL is required")
+        if errors:
+            raise ValueError("Unsafe production configuration: " + "; ".join(errors))
+        return self
 
 
 @lru_cache

@@ -152,3 +152,22 @@ jobs:
       # Fictional-fixture discipline (no management-derived tokens in code) is
       # additionally enforced by the backend test suite:
       # tests/test_fixtures_discipline.py.
+
+  deployment-config:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate pilot service definition
+        env:
+          POSTGRES_PASSWORD: ci-placeholder-only
+        run: |
+          cp .env.example .env
+          docker compose -f compose.pilot.yml config --quiet
+
+      - name: Build API and worker image
+        run: docker build -t arie-sentinel-api:ci apps/api
+
+      - name: Build frontend image
+        run: docker build -t arie-sentinel-web:ci apps/web
