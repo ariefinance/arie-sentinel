@@ -53,7 +53,7 @@ export function screeningTone(state: ScreeningState | null): PillTone {
     case 'POTENTIAL_MATCH':
       return 'attention';
     case 'NO_MATERIAL_MATCH':
-      return 'info';
+      return 'positive';
     case 'NOT_STARTED':
     case null:
     case undefined:

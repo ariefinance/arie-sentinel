@@ -122,15 +122,17 @@ test.each([
     screeningState: 'NO_MATERIAL_MATCH',
     completeness: 'COMPLETE_WITH_LIMITATIONS',
     message: 'Screening completed with no material matches.',
+    statusLabel: 'Screening: No material match (confirmed)',
   },
   {
     screeningState: null,
     completeness: 'MATERIAL_SOURCE_UNAVAILABLE',
     message: 'Screening was not completed because the provider was unavailable.',
+    statusLabel: 'Screening: Not started (neutral)',
   },
 ])(
   'shows the correct empty-screening status: $message',
-  async ({ screeningState, completeness, message }) => {
+  async ({ screeningState, completeness, message, statusLabel }) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
@@ -158,6 +160,7 @@ test.each([
     expect(await screen.findByText('Example Public Company')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'SCREENING' }));
     expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: statusLabel })).toBeInTheDocument();
   },
 );
 
