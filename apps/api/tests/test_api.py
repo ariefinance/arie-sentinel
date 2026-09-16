@@ -113,6 +113,59 @@ def test_health(client: TestClient) -> None:
     assert client.get("/health").json()["database"] == "ok"
 
 
+def test_management_demo_commodities_scenarios(client: TestClient) -> None:
+    ambiguous = client.post(
+        "/investigations",
+        json={"company_label": "Orion Petro Trading", "contact_label": "Karim Mansour"},
+        headers=ANALYST,
+    ).json()
+    _drain_jobs()
+    ambiguous = client.get(
+        f"/investigations/{ambiguous['investigation_id']}", headers=ANALYST
+    ).json()
+    assert ambiguous["company_identity_status"] == "AMBIGUOUS"
+    assert len(ambiguous["entity_candidates"]) == 3
+
+    scenarios = [
+        ("Pacific Energy Procurement Ltd", "Daniel Kim", "VERIFIED", "NO_MATERIAL_MATCH"),
+        ("Atlas Global Fuels", "Michael Grant", "UNVERIFIED", "NO_MATERIAL_MATCH"),
+        ("Northstar Petroleum Trading", "Victor Lane", "UNVERIFIED", "POTENTIAL_MATCH"),
+        ("Meridian Energy Supplies Ltd", "Amira Hassan", "UNVERIFIED", "NO_MATERIAL_MATCH"),
+    ]
+    verified_match_basis = ""
+    for company, contact, expected_relationship, expected_screening in scenarios:
+        created = client.post(
+            "/investigations",
+            json={"company_label": company, "contact_label": contact},
+            headers=ANALYST,
+        ).json()
+        _drain_jobs()
+        discovered = client.get(
+            f"/investigations/{created['investigation_id']}", headers=ANALYST
+        ).json()
+        assert len(discovered["entity_candidates"]) == 1
+        resolved = client.post(
+            f"/investigations/{created['investigation_id']}/resolve-entity",
+            json={
+                "candidate_id": discovered["entity_candidates"][0]["entity_candidate_id"],
+                "rationale": "Fictional management-demo registry identifier checked",
+            },
+            headers=ANALYST,
+        )
+        assert resolved.status_code == 200
+        _drain_jobs()
+        enriched = client.get(
+            f"/investigations/{created['investigation_id']}", headers=ANALYST
+        ).json()
+        assert enriched["company_identity_status"] == "CONFIRMED"
+        assert enriched["candidates"][0]["relationship_state"] == expected_relationship
+        assert enriched["screening_state"] == expected_screening
+        if expected_relationship == "VERIFIED":
+            verified_match_basis = enriched["candidates"][0]["match_basis"]
+
+    assert "physical identity" in verified_match_basis
+
+
 def test_evidence_review_and_report_flow(client: TestClient) -> None:
     created = client.post(
         "/investigations",

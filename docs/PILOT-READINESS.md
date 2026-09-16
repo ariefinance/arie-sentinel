@@ -16,6 +16,9 @@ Basic Authentication; the API, worker, and PostgreSQL remain private. Credential
 and the generated `BASIC_AUTH_HTPASSWD` value belong in the deployment platform's
 secret store and must never be committed.
 
+`BASIC_AUTH_HTPASSWD` has no packaged fallback: the frontend refuses to start
+when the deployment environment does not explicitly supply this secret.
+
 After management approval, reuse the deployed service layout and convert it in
 place: make the repository private, configure approved live-provider credentials,
 connect the production OIDC client and API validation settings, set

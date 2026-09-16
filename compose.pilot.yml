@@ -49,7 +49,7 @@ services:
     build: ./apps/web
     environment:
       API_UPSTREAM: http://api:8000
-      BASIC_AUTH_HTPASSWD: "${BASIC_AUTH_HTPASSWD:-sentinel-demo:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M=}"
+      BASIC_AUTH_HTPASSWD: "${BASIC_AUTH_HTPASSWD:?set BASIC_AUTH_HTPASSWD outside Git}"
     ports:
       - "${SENTINEL_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     depends_on:

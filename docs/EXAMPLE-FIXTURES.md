@@ -1,5 +1,22 @@
 # Example Fixtures (canonical, fictional)
 
+## Management-demo commodities scenarios
+
+These invented cases provide transaction-adjacent context without validating a
+commodity transaction and without reproducing any real management data.
+
+| Scenario | Company and contact | Demonstrates |
+|---|---|---|
+| Seller / ambiguous entity | **Orion Petro Trading** · **Karim Mansour** | Three plausible legal entities; analyst resolution required. |
+| Buyer / relationship established | **Pacific Energy Procurement Ltd** · **Daniel Kim** | Registry officer linkage, with explicit physical-identity limitation. |
+| Intermediary / relationship unverified | **Atlas Global Fuels** · **Michael Grant** | Confirmed company but no authoritative person relationship. |
+| Potential screening match | **Northstar Petroleum Trading** · **Victor Lane** | Potential match requiring human disposition and rationale. |
+| Clean screening | **Meridian Energy Supplies Ltd** · **Amira Hassan** | Completed screening with `NO_MATERIAL_MATCH`. |
+
+All organisations, people, identifiers, addresses, URLs, screening profiles, and
+records in these scenarios are fictional. `.test` domains cannot resolve to live
+counterparties.
+
 **Status:** Canonical. This is the **single** set of example data used across all
 Sentinel documentation, wireframes, and (later) tests.
 

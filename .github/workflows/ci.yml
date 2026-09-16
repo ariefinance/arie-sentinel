@@ -162,9 +162,15 @@ jobs:
       - name: Validate pilot service definition
         env:
           POSTGRES_PASSWORD: ci-placeholder-only
+          BASIC_AUTH_HTPASSWD: "sentinel-ci:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M="
         run: |
           cp .env.example .env
           docker compose -f compose.pilot.yml config --quiet
+
+          if env -u BASIC_AUTH_HTPASSWD docker compose -f compose.pilot.yml config --quiet; then
+            echo "Compose unexpectedly accepted a missing Basic Auth secret."
+            exit 1
+          fi
 
       - name: Build API and worker image
         run: docker build -t arie-sentinel-api:ci apps/api
@@ -175,6 +181,7 @@ jobs:
       - name: Smoke test packaged stack
         env:
           POSTGRES_PASSWORD: ci-placeholder-only
+          BASIC_AUTH_HTPASSWD: "sentinel-demo:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M="
         run: |
           cat > .env <<'EOF'
           ARIE_ENV=test

@@ -51,14 +51,15 @@ export function Investigate() {
         <p className="investigate__eyebrow">Counterparty Integrity</p>
         <h1 className="investigate__title">Investigate</h1>
         <p className="investigate__lede">
-          Enter the company and the contact person exactly as you received them.
+          Investigate the company and named contact before proceeding with a transaction or
+          relationship.
         </p>
 
         <form className="investigate__form" onSubmit={handleSubmit} noValidate>
           <TextField
             label="Company"
             hint="as received"
-            placeholder="e.g. Vantar - Castellan"
+            placeholder="e.g. Orion Petro Trading"
             value={company}
             onChange={(e) => setCompany(e.target.value)}
             required
@@ -68,7 +69,7 @@ export function Investigate() {
           <TextField
             label="Contact person"
             hint="as received"
-            placeholder="e.g. Jordan Rivera"
+            placeholder="e.g. Karim Mansour"
             value={contact}
             onChange={(e) => setContact(e.target.value)}
             required
