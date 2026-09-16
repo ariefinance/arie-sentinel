@@ -106,7 +106,7 @@ def test_company_only_investigation_runs_without_person_workflow(client: TestCli
     screening_sources = [
         source
         for source in client.get(f"/investigations/{inv_id}/sources", headers=ANALYST).json()
-        if source["source_class"] == "SANCTIONS_PEP_SCREENING"
+        if source["source_class"] == "sanctions_pep_screening"
     ]
     assert [source["title"] for source in screening_sources] == [
         "Screening search: Meridian Energy Supplies Ltd"
