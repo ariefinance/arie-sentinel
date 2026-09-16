@@ -48,7 +48,7 @@ services:
   frontend:
     build: ./apps/web
     ports:
-      - "8080:8080"
+      - "${SENTINEL_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     depends_on:
       api:
         condition: service_healthy

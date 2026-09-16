@@ -19,7 +19,7 @@ placeholder set is [`.env.example`](../.env.example).
 |---|---:|---|
 | `ARIE_ENV=production` | Yes | Enables production safety validation and disables development identity handling. |
 | `ARIE_DATABASE_URL` | Yes | Non-development PostgreSQL connection using the `postgresql+psycopg://` driver. |
-| `ARIE_CORS_ORIGINS` | Yes | Comma-separated HTTPS origins allowed to call the API. Never use `*`. |
+| `ARIE_CORS_ORIGINS` | Yes | Comma-separated HTTPS origins allowed to call the API. Wildcards, credentials, paths, queries, and fragments are rejected. |
 | `ARIE_LOG_LEVEL` | No | Runtime log level; defaults to `info`. |
 | `ARIE_PROVIDER_MODE=live` | Yes | Selects live adapters. Fixture mode is rejected in production. |
 | `ARIE_PROVIDER_TIMEOUT_SECONDS` | No | External-provider timeout; defaults to 15 seconds. |
@@ -41,6 +41,9 @@ identity SDK. ARIE must supply the approved IdP client integration that calls
 `configureTokenProvider`; the provider must keep tokens in memory and return the
 analyst or manager role. Production API requests fail before network access when
 no bearer token is available.
+
+All configured OIDC and external-provider endpoints must be valid HTTPS URLs in
+production. Plain HTTP configuration fails application startup.
 
 ### Corporate intelligence
 
@@ -119,10 +122,14 @@ docker run --env-file .env arie-sentinel-api:phase1 \
 ```
 
 For a single-host controlled environment, `compose.pilot.yml` expresses the
-same topology and a persistent PostgreSQL volume. Set `POSTGRES_PASSWORD` and
-all `.env` values outside Git, set `ARIE_DATABASE_URL` to the private database
-address, validate with `docker compose -f compose.pilot.yml config`, then start
-with `docker compose -f compose.pilot.yml up -d --build`.
+same topology and a persistent PostgreSQL volume. The frontend binds to
+`127.0.0.1:8080` by default. Set `POSTGRES_PASSWORD` and all `.env` values
+outside Git, set `ARIE_DATABASE_URL` to the private database address, validate
+with `docker compose -f compose.pilot.yml config`, then start with
+`docker compose -f compose.pilot.yml up -d --build`. Exposing Sentinel beyond
+the host requires an approved TLS ingress/reverse proxy; override
+`SENTINEL_BIND_ADDRESS` only for that controlled ingress configuration. API,
+worker, and PostgreSQL ports are never published by this Compose definition.
 
 The API health check is `GET /health`; it verifies database connectivity. The
 frontend build has no runtime configuration other than the same-origin `/api`
@@ -148,7 +155,11 @@ Before any real ARIE case, verify all items and retain the deployment record:
 - [ ] Migration, health check, worker processing, final report, backup, and restore are exercised.
 
 Production startup rejects development authentication, fixture provider mode,
-the default development database, and incomplete OIDC configuration.
+the default development database, incomplete OIDC configuration, HTTP external
+endpoints, and unsafe CORS origins. CI also starts the packaged PostgreSQL,
+migration, API, worker, and frontend stack and verifies both direct API health
+and `/api/health` routing through the frontend proxy before removing containers
+and volumes.
 
 ## Controlled-pilot matrix
 
