@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import socket
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as ResolverTimeoutError
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
@@ -17,6 +19,7 @@ from .http import request_json
 _ALLOWED_CONTENT_TYPES = {"text/html", "text/plain", "application/xhtml+xml"}
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_REDIRECTS = 3
+_DNS_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sentinel-dns")
 
 
 class _TextExtractor(HTMLParser):
@@ -38,9 +41,14 @@ class _TextExtractor(HTMLParser):
             self.parts.append(data.strip())
 
 
-def _validate_public_url(url: str) -> None:
+def _validate_public_url(url: str, timeout: float) -> None:
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
         raise ValueError("Only unauthenticated HTTP(S) URLs are permitted")
     hostname = parsed.hostname.rstrip(".").lower()
     if hostname == "localhost" or hostname.endswith(".localhost"):
@@ -49,9 +57,13 @@ def _validate_public_url(url: str) -> None:
     try:
         literal_address = ipaddress.ip_address(hostname)
     except ValueError:
-        addresses = {
-            item[4][0] for item in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-        }
+        resolution = _DNS_EXECUTOR.submit(socket.getaddrinfo, hostname, port, 0, socket.SOCK_STREAM)
+        try:
+            address_info = resolution.result(timeout=max(timeout, 0.1))
+        except ResolverTimeoutError as exc:
+            resolution.cancel()
+            raise ValueError("DNS resolution timed out") from exc
+        addresses = {item[4][0] for item in address_info}
     else:
         addresses = {str(literal_address)}
     if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
@@ -70,6 +82,7 @@ def _extract_text(body: bytes, content_type: str, encoding: str | None) -> str:
 class StructuredWebSearchProvider:
     def __init__(self, base_url: str, api_key: str, timeout: float = 15.0) -> None:
         self.base_url = base_url
+        self.timeout = timeout
         self.client = httpx.Client(
             timeout=timeout,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -78,6 +91,7 @@ class StructuredWebSearchProvider:
         self.page_client = httpx.Client(
             timeout=timeout,
             follow_redirects=False,
+            trust_env=False,
             headers={
                 "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
                 "User-Agent": "ARIE-Sentinel/1.0 public-source-retriever",
@@ -118,7 +132,7 @@ class StructuredWebSearchProvider:
         current = url
         try:
             for redirect_count in range(_MAX_REDIRECTS + 1):
-                _validate_public_url(current)
+                _validate_public_url(current, self.timeout)
                 with self.page_client.stream("GET", current) as response:
                     if response.is_redirect:
                         if redirect_count == _MAX_REDIRECTS or not response.headers.get("location"):

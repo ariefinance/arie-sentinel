@@ -229,6 +229,7 @@ def test_web_retrieval_hashes_underlying_page_without_forwarding_credentials(
     ("url", "response"),
     [
         ("http://127.0.0.1/internal", None),
+        ("https://user:password@www.example.com/internal", None),
         (
             "https://www.example.com/file.pdf",
             httpx.Response(200, headers={"content-type": "application/pdf"}, content=b"pdf"),
@@ -263,7 +264,7 @@ def test_web_retrieval_blocks_unsafe_or_unsupported_targets(
 
     provider.page_client = _client(handler)
     assert provider.retrieve(url) is None
-    if url.startswith("http://127."):
+    if response is None:
         assert requests == []
 
 
