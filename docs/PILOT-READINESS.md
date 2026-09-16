@@ -7,6 +7,21 @@ is not a regulatory screening system of record. Use public or synthetic subjects
 until ARIE has approved the providers, identity configuration, deployment, and
 pilot controls below.
 
+## Management-demo deployment
+
+The temporary management demo uses `ARIE_ENV=demo`, fixture providers, development
+role headers, and an explicit frontend build setting of
+`VITE_AUTH_MODE=development`. Its public frontend ingress is protected with HTTP
+Basic Authentication; the API, worker, and PostgreSQL remain private. Credentials
+and the generated `BASIC_AUTH_HTPASSWD` value belong in the deployment platform's
+secret store and must never be committed.
+
+After management approval, reuse the deployed service layout and convert it in
+place: make the repository private, configure approved live-provider credentials,
+connect the production OIDC client and API validation settings, set
+`ARIE_ENV=production`, `ARIE_PROVIDER_MODE=live`, and `VITE_AUTH_MODE=production`,
+then pass the production safety gate below before any controlled live case.
+
 ## Production configuration
 
 All values are runtime environment variables. Store secrets in the deployment
