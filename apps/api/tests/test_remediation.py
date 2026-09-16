@@ -9,16 +9,25 @@ from sqlalchemy.orm import Session
 
 from arie_sentinel.config import Settings
 from arie_sentinel.models.core import EntityCandidate
-from arie_sentinel.models.enums import SourceClass
+from arie_sentinel.models.enums import (
+    CompletenessState,
+    PersonEvidenceStatus,
+    RelationshipState,
+    ScreeningState,
+    SourceClass,
+)
 from arie_sentinel.models.evidence import Evidence, Source
 from arie_sentinel.providers import fixtures
-from arie_sentinel.providers.base import DomainRecord, RetrievedPage, WebResult
+from arie_sentinel.providers.base import DomainRecord, ProviderUnavailable, RetrievedPage, WebResult
 from arie_sentinel.providers.factory import build_providers
 from arie_sentinel.services.investigations import (
     _company_screening_subject,
+    _corroborate_contact,
     _run_public_intelligence,
+    _run_screening,
     create_investigation,
 )
+from arie_sentinel.services.reports import screening_summary
 
 
 def _create(db: Session, *, case_context: dict[str, str] | None = None):
@@ -180,3 +189,58 @@ def test_social_profile_is_not_treated_as_company_domain(db: Session) -> None:
     )
 
     assert domain.lookups == []
+
+
+class _ZeroScreening:
+    def screen(self, subject):
+        return []
+
+
+class _UnavailableScreening:
+    def screen(self, subject):
+        raise ProviderUnavailable("screening unavailable")
+
+
+def test_zero_screening_is_distinct_from_provider_unavailable(db: Session) -> None:
+    completed = _create(db)
+    _run_screening(db, completed, SimpleNamespace(screening=_ZeroScreening()))
+    assert completed.screening_state is ScreeningState.NO_MATERIAL_MATCH
+    assert screening_summary(completed, []) == (
+        "Screening completed and returned no material matches."
+    )
+
+    unavailable = _create(db)
+    _run_screening(db, unavailable, SimpleNamespace(screening=_UnavailableScreening()))
+    assert unavailable.screening_state is None
+    assert unavailable.completeness_state is CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+    assert screening_summary(unavailable, []) == (
+        "Screening was not completed because a required source was unavailable."
+    )
+
+
+def test_registry_relationship_does_not_overstate_submitted_person_identity(db: Session) -> None:
+    investigation = _create(db)
+    entity = EntityCandidate(
+        investigation_id=investigation.investigation_id,
+        legal_name="Example Public Company Ltd",
+        jurisdiction="gb",
+        registry_class="companies_house",
+        registry_id="12345678",
+        legal_status="Active",
+        registered_address=None,
+        incorporation_date=None,
+        lei=None,
+        alternative_names=[],
+        provider="test",
+        retrieved_at=investigation.created_at,
+    )
+
+    class Registry:
+        def discover_officers(self, contact: str, jurisdiction: str, registry_id: str):
+            return [{"name": "Example Public Person", "position": "Director"}]
+
+    _corroborate_contact(db, investigation, entity, SimpleNamespace(registry=Registry()))
+    candidate = investigation.candidates[0]
+    assert candidate.relationship_state is RelationshipState.VERIFIED
+    assert candidate.person_evidence_status is PersonEvidenceStatus.LIMITED_EVIDENCE
+    assert "does not conclusively verify" in (candidate.match_basis or "")

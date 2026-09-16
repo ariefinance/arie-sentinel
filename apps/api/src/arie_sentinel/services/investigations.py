@@ -10,7 +10,6 @@ Enforced invariants (also guarded structurally in the DB):
 
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -40,13 +39,12 @@ from ..models.enums import (
     SourceClass,
 )
 from ..models.evidence import Evidence, Finding, ScreeningResult, Source
-from ..models.ops import Job
+from ..models.ops import AuditEvent, Job
 from ..providers import ProviderUnavailable
 from ..providers.base import CandidateEntity, ScreeningSubject
 from ..providers.factory import Providers, build_providers
 from ..providers.normalization import normalize_entity_name
 
-_CONTACT_SEPARATOR = re.compile(r"\s*(?:-|/|,|&|\bvia\b)\s*", flags=re.IGNORECASE)
 _THIRD_PARTY_DOMAIN_SUFFIXES = (
     "facebook.com",
     "instagram.com",
@@ -90,17 +88,13 @@ def get_or_create_counterparty(
 
 
 def _derive_person_candidates(session: Session, investigation: Investigation) -> None:
-    """Create unverified candidates by deterministically splitting the supplied label."""
-    fragments = [
-        part.strip()
-        for part in _CONTACT_SEPARATOR.split(investigation.contact_label)
-        if part.strip()
-    ]
-    for frag in fragments:
+    """Retain the supplied contact as one unverified candidate; never invent people."""
+    label = investigation.contact_label.strip()
+    if label:
         session.add(
             PersonCandidate(
                 investigation_id=investigation.investigation_id,
-                label_fragment=frag,
+                label_fragment=label,
                 person_evidence_status=None,  # unresolved until discovery/evidence
                 relationship_state=RelationshipState.UNVERIFIED,
                 created_by="system",
@@ -252,9 +246,11 @@ def run_discovery(
     if len(candidates) == 0:
         inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        inv.investigation_state = InvestigationState.COMPLETED
     else:
         inv.company_identity_status = CompanyIdentityStatus.AMBIGUOUS
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        inv.investigation_state = InvestigationState.PARTIAL_RESULTS
         record_audit(
             session,
             actor="adapter:corporate_registry",
@@ -265,8 +261,6 @@ def run_discovery(
             payload={"candidate_count": len(candidates)},
         )
 
-    inv.investigation_state = InvestigationState.COMPLETED
-
 
 def resolve_entity(
     session: Session,
@@ -275,7 +269,6 @@ def resolve_entity(
     *,
     actor: str,
     rationale: str,
-    providers: Providers | Any | None = None,
 ) -> Counterparty:
     if candidate.investigation_id != investigation.investigation_id:
         raise ValueError("Candidate does not belong to this investigation.")
@@ -285,6 +278,7 @@ def resolve_entity(
     investigation.company_identity_status = CompanyIdentityStatus.CONFIRMED
     investigation.company_match_basis = f"Analyst selected: {candidate.match_basis or rationale}"
     investigation.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+    investigation.investigation_state = InvestigationState.PARTIAL_RESULTS
     record_audit(
         session,
         actor=actor,
@@ -298,6 +292,54 @@ def resolve_entity(
             "candidate_id": str(candidate.entity_candidate_id),
         },
     )
+    existing_job = session.scalar(
+        select(Job).where(
+            Job.investigation_id == investigation.investigation_id,
+            Job.job_type == "enrichment",
+        )
+    )
+    if existing_job is None:
+        session.add(
+            Job(
+                investigation_id=investigation.investigation_id,
+                job_type="enrichment",
+                status=JobStatus.PENDING,
+                payload={
+                    "investigation_id": str(investigation.investigation_id),
+                    "candidate_id": str(candidate.entity_candidate_id),
+                },
+            )
+        )
+    return cp
+
+
+def run_enrichment(
+    session: Session,
+    investigation_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    providers: Providers | Any | None = None,
+) -> None:
+    """Run idempotent post-resolution enrichment in the PostgreSQL worker."""
+    investigation = session.get(Investigation, investigation_id)
+    candidate = session.get(EntityCandidate, candidate_id)
+    if (
+        investigation is None
+        or candidate is None
+        or candidate.investigation_id != investigation_id
+        or investigation.company_identity_status is not CompanyIdentityStatus.CONFIRMED
+    ):
+        raise ValueError("Enrichment requires a confirmed entity candidate.")
+    completed = session.scalar(
+        select(AuditEvent.event_id).where(
+            AuditEvent.investigation_id == investigation_id,
+            AuditEvent.object_type == "enrichment",
+            AuditEvent.target_ref == str(candidate_id),
+        )
+    )
+    if completed is not None:
+        return
+
+    investigation.investigation_state = InvestigationState.RUNNING
     active_providers = providers or build_providers(get_settings())
     _run_screening(session, investigation, active_providers, candidate)
     _corroborate_contact(session, investigation, candidate, active_providers)
@@ -305,16 +347,34 @@ def resolve_entity(
     if candidate.lei and gleif is not None:
         try:
             gleif_data = gleif.lookup_lei(candidate.lei)
-        except ProviderUnavailable:
+        except ProviderUnavailable as exc:
             gleif_data = None
+            investigation.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+            record_audit(
+                session,
+                actor="adapter:gleif",
+                action=AuditAction.STATE_CHANGE,
+                object_type="enrichment",
+                investigation_id=investigation_id,
+                rationale=str(exc),
+                payload={"source": "gleif", "status": "unavailable"},
+            )
         if gleif_data is not None:
-            session.add(
-                Identifier(
-                    counterparty_id=cp.counterparty_id,
-                    id_type="lei",
-                    id_value=candidate.lei,
+            existing_identifier = session.scalar(
+                select(Identifier.identifier_id).where(
+                    Identifier.counterparty_id == investigation.counterparty_id,
+                    Identifier.id_type == "lei",
+                    Identifier.id_value == candidate.lei,
                 )
             )
+            if existing_identifier is None:
+                session.add(
+                    Identifier(
+                        counterparty_id=investigation.counterparty_id,
+                        id_type="lei",
+                        id_value=candidate.lei,
+                    )
+                )
             gleif_source = Source(
                 investigation_id=investigation.investigation_id,
                 source_class=SourceClass.CORPORATE_REGISTRY,
@@ -336,7 +396,16 @@ def resolve_entity(
                 )
             )
     _run_public_intelligence(session, investigation, active_providers)
-    return cp
+    investigation.investigation_state = InvestigationState.COMPLETED
+    record_audit(
+        session,
+        actor="worker:enrichment",
+        action=AuditAction.STATE_CHANGE,
+        object_type="enrichment",
+        investigation_id=investigation_id,
+        target_ref=str(candidate_id),
+        payload={"status": "completed"},
+    )
 
 
 def _parse_time(value: str | None) -> datetime:
@@ -359,7 +428,17 @@ def _corroborate_contact(
         officers = discover_officers(
             investigation.contact_label, entity.jurisdiction, entity.registry_id
         )
-    except ProviderUnavailable:
+    except ProviderUnavailable as exc:
+        investigation.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+        record_audit(
+            session,
+            actor="adapter:corporate_registry",
+            action=AuditAction.STATE_CHANGE,
+            object_type="person_corroboration",
+            investigation_id=investigation.investigation_id,
+            rationale=str(exc),
+            payload={"status": "unavailable"},
+        )
         return
     for person in investigation.candidates:
         person_norm = normalize_entity_name(person.label_fragment)
@@ -400,8 +479,12 @@ def _corroborate_contact(
             )
         )
         person.relationship_state = RelationshipState.VERIFIED
-        person.person_evidence_status = PersonEvidenceStatus.IDENTITY_EVIDENCE_FOUND
-        person.match_basis = "Exact normalized officer name and resolved registry identifier."
+        person.match_basis = (
+            "The registry verifies that an officer with this normalized name is linked to the "
+            "resolved company identifier; it does not conclusively verify the submitted human's "
+            "physical identity."
+        )
+        person.person_evidence_status = PersonEvidenceStatus.LIMITED_EVIDENCE
 
 
 def _country_from_jurisdiction(jurisdiction: str | None) -> tuple[str, ...]:
@@ -556,6 +639,7 @@ def _run_public_intelligence(
     try:
         result_sets = [providers.web.search(query) for query in queries]
     except ProviderUnavailable as exc:
+        inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
         record_audit(
             session,
             actor="adapter:web_search",
@@ -617,8 +701,18 @@ def _run_public_intelligence(
     for domain, association_basis in _claimed_company_domains(inv).items():
         try:
             domain_record = providers.domain.lookup(domain)
-        except ProviderUnavailable:
+        except ProviderUnavailable as exc:
             domain_record = None
+            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+            record_audit(
+                session,
+                actor="adapter:rdap",
+                action=AuditAction.STATE_CHANGE,
+                object_type="domain_research",
+                investigation_id=inv.investigation_id,
+                rationale=str(exc),
+                payload={"domain": domain, "status": "unavailable"},
+            )
         if domain_record is not None:
             domain_source = Source(
                 investigation_id=inv.investigation_id,

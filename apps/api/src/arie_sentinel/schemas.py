@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,6 +122,10 @@ class HealthOut(BaseModel):
 class ResolveEntityRequest(BaseModel):
     candidate_id: uuid.UUID
     rationale: str = Field(min_length=3, max_length=2000)
+
+
+class FinaliseReportRequest(BaseModel):
+    confirm_finalise: Literal[True]
 
 
 class ReviewRequest(BaseModel):

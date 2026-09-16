@@ -28,11 +28,11 @@
 
   <h2>4. Named person / relationship</h2>
   <p><strong>Submitted contact:</strong> {{ investigation.contact_label }}</p>
-  {% for person in investigation.candidates %}<p>{{ person.label_fragment }} — {{ person.relationship_state.value if person.relationship_state else "UNVERIFIED" }}{% if person.match_basis %}: {{ person.match_basis }}{% endif %}</p>{% else %}<p>No person candidate was derived.</p>{% endfor %}
+  {% for person in investigation.candidates %}<p>{{ person.label_fragment }} — {{ person.relationship_state.value if person.relationship_state else "UNVERIFIED" }}{% if person.match_basis %}: {{ person.match_basis }}{% endif %}{% if person.relationship_state and person.relationship_state.value == "VERIFIED" %}<br><em>This verifies a registry relationship for a person with this name, not the physical identity of the submitted individual.</em>{% endif %}</p>{% else %}<p>No person candidate was derived.</p>{% endfor %}
 
   <h2>5. Screening</h2>
   <table><tr><th>Subject</th><th>Potential match / basis</th><th>Disposition</th></tr>
-  {% for item in screening %}<tr><td>{{ item.subject_label }}</td><td>{{ item.matched_profile_id or "No profile" }}<br>{{ item.match_basis or "—" }}{% if item.match_score is not none %} ({{ "%.3f"|format(item.match_score) }}){% endif %}</td><td>{{ item.analyst_disposition or "Pending analyst review" }}{% if item.analyst_rationale %}<br>{{ item.analyst_rationale }}{% endif %}</td></tr>{% else %}<tr><td colspan="3">No material matches were returned, or screening was unavailable.</td></tr>{% endfor %}</table>
+  {% for item in screening %}<tr><td>{{ item.subject_label }}</td><td>{{ item.matched_profile_id or "No profile" }}<br>{{ item.match_basis or "—" }}{% if item.match_score is not none %} ({{ "%.3f"|format(item.match_score) }}){% endif %}</td><td>{{ item.analyst_disposition or "Pending analyst review" }}{% if item.analyst_rationale %}<br>{{ item.analyst_rationale }}{% endif %}</td></tr>{% else %}<tr><td colspan="3">{{ screening_summary }}</td></tr>{% endfor %}</table>
 
   <h2>6. Findings / contradictions / follow-up</h2>
   {% for item in findings %}<p><strong>{{ item.title }}</strong> [{{ item.review_status.value }}]<br>{{ item.assessment_text }}<br><em>Action:</em> {{ item.action_text }}</p>{% else %}<p>No system findings were recorded. This does not mean that every fact was established.</p>{% endfor %}

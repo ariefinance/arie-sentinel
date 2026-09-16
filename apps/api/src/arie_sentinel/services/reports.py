@@ -9,8 +9,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models.core import Investigation
+from ..models.enums import CompletenessState, ScreeningState
 from ..models.evidence import Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
+
+
+def screening_summary(investigation: Investigation, screening: list[ScreeningResult]) -> str | None:
+    if screening:
+        return None
+    if investigation.screening_state is ScreeningState.NO_MATERIAL_MATCH:
+        return "Screening completed and returned no material matches."
+    if investigation.completeness_state is CompletenessState.MATERIAL_SOURCE_UNAVAILABLE:
+        return "Screening was not completed because a required source was unavailable."
+    return "Screening has not yet completed."
 
 
 def render_report(session: Session, investigation: Investigation) -> bytes:
@@ -43,6 +54,7 @@ def render_report(session: Session, investigation: Investigation) -> bytes:
         sources=sources,
         findings=findings,
         screening=screening,
+        screening_summary=screening_summary(investigation, list(screening)),
         audit=audit,
     )
     result = HTML(string=html).write_pdf()

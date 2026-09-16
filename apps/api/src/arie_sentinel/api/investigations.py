@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..audit import record_audit
-from ..auth import Principal, get_current_principal
+from ..auth import Principal, get_current_principal, require_manager
 from ..db import get_db
 from ..models.core import EntityCandidate, Investigation
 from ..models.enums import AuditAction, CompanyIdentityStatus
@@ -18,6 +18,7 @@ from ..models.ops import AuditEvent
 from ..schemas import (
     AuditEventOut,
     CreateInvestigationRequest,
+    FinaliseReportRequest,
     FindingOut,
     InvestigationOut,
     ResolveEntityRequest,
@@ -55,7 +56,7 @@ def create(
 ) -> InvestigationOut:
     # Persist + enqueue the discovery job, then return promptly. The standalone
     # worker (arie_sentinel.jobs.worker) processes the queue; the client refetches
-    # the investigation to observe RUNNING -> COMPLETED. Request handlers never
+    # the investigation to observe discovery state changes. Request handlers never
     # process the queue.
     inv = create_investigation(
         db,
@@ -178,8 +179,9 @@ def resolve(
 @router.post("/{investigation_id}/report")
 def report(
     investigation_id: uuid.UUID,
+    body: FinaliseReportRequest,
     db: Session = Depends(get_db),
-    principal: Principal = Depends(get_current_principal),
+    principal: Principal = Depends(require_manager),
 ) -> Response:
     inv = _load(db, investigation_id)
     if inv.company_identity_status is not CompanyIdentityStatus.CONFIRMED:
@@ -194,7 +196,7 @@ def report(
         action=AuditAction.FINALISE_REPORT,
         object_type="report",
         investigation_id=inv.investigation_id,
-        payload={"format": "pdf"},
+        payload={"format": "pdf", "confirm_finalise": body.confirm_finalise},
     )
     db.commit()
     return Response(

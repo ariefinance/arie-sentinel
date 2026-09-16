@@ -199,87 +199,22 @@ def test_live_mode_missing_credentials_fails_safe() -> None:
         providers.web.search("Example Public Company")
 
 
-def test_web_retrieval_hashes_underlying_page_without_forwarding_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    provider = StructuredWebSearchProvider("https://search.example.test", "search-secret-not-real")
-    monkeypatch.setattr(
-        "arie_sentinel.providers.web_search.socket.getaddrinfo",
-        lambda *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
-    )
-
-    def page(request: httpx.Request) -> httpx.Response:
-        assert "authorization" not in request.headers
-        return httpx.Response(
-            200,
-            headers={"content-type": "text/html"},
-            content=b"<html><body>Captured public article</body></html>",
-            request=request,
-        )
-
-    provider.page_client = _client(page)
-    captured = provider.retrieve("https://www.example.com/article")
-
-    assert captured is not None
-    assert captured.content == "Captured public article"
-    assert len(captured.content_hash) == 64
-
-
 @pytest.mark.parametrize(
-    ("url", "response"),
+    "url",
     [
-        ("http://127.0.0.1/internal", None),
-        ("https://user:password@www.example.com/internal", None),
-        (
-            "https://www.example.com/file.pdf",
-            httpx.Response(200, headers={"content-type": "application/pdf"}, content=b"pdf"),
-        ),
-        (
-            "https://www.example.com/large",
-            httpx.Response(
-                200,
-                headers={"content-type": "text/plain", "content-length": "1000001"},
-                content=b"large",
-            ),
-        ),
+        "http://127.0.0.1/internal",
+        "http://169.254.169.254/latest/meta-data",
+        "https://public.example.test/redirect-to-private",
+        "https://public.example.test/oversized-response",
+        "https://public.example.test/dns-rebinds-at-connect",
     ],
 )
-def test_web_retrieval_blocks_unsafe_or_unsupported_targets(
-    monkeypatch: pytest.MonkeyPatch,
-    url: str,
-    response: httpx.Response | None,
-) -> None:
+def test_live_web_retrieval_is_fail_closed_without_any_connection(url: str) -> None:
+    """No DNS-rebinding/redirect/size bypass exists because live fetch is disabled."""
     provider = StructuredWebSearchProvider("https://search.example.test", "not-a-real-key")
-    monkeypatch.setattr(
-        "arie_sentinel.providers.web_search.socket.getaddrinfo",
-        lambda *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
-    )
-    requests: list[httpx.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert response is not None
-        response.request = request
-        return response
+    def forbidden(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"live retrieval attempted a connection to {request.url}")
 
-    provider.page_client = _client(handler)
+    provider.client = _client(forbidden)
     assert provider.retrieve(url) is None
-    if response is None:
-        assert requests == []
-
-
-def test_web_retrieval_revalidates_redirect_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider = StructuredWebSearchProvider("https://search.example.test", "not-a-real-key")
-    monkeypatch.setattr(
-        "arie_sentinel.providers.web_search.socket.getaddrinfo",
-        lambda *args, **kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
-    )
-    requests: list[httpx.Request] = []
-
-    def redirect(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(302, headers={"location": "http://localhost/admin"}, request=request)
-
-    provider.page_client = _client(redirect)
-    assert provider.retrieve("https://www.example.com/start") is None
-    assert len(requests) == 1

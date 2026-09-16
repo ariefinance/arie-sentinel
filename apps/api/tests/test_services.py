@@ -39,7 +39,7 @@ def test_one_name_search_result_does_not_auto_confirm(db: Session) -> None:
     assert inv.company_identity_status is CompanyIdentityStatus.AMBIGUOUS
     assert inv.counterparty_id is None
     assert len(inv.entity_candidates) == 1
-    assert inv.investigation_state is InvestigationState.COMPLETED
+    assert inv.investigation_state is InvestigationState.PARTIAL_RESULTS
 
 
 def test_authoritative_candidate_can_be_selected_and_is_audited(db: Session) -> None:
@@ -107,11 +107,13 @@ def test_partial_contact_single_candidate(db: Session) -> None:
     assert inv.candidates[0].label_fragment == "JR"
 
 
-def test_multiple_contacts_multiple_candidates(db: Session) -> None:
-    inv = _create(db, "Vantar - Castellan", "NOVEXA - Amara - via Delta Trading")
-    fragments = sorted(c.label_fragment for c in inv.candidates)
-    assert len(fragments) >= 2
-    assert "Amara" in fragments
+@pytest.mark.parametrize(
+    "label",
+    ["Jean-Pierre Dupont", "Smith, John", "Mohammed Al-Hassan", "Anne-Marie Smith"],
+)
+def test_contact_label_remains_one_candidate(db: Session, label: str) -> None:
+    inv = _create(db, "Vantar - Castellan", label)
+    assert [candidate.label_fragment for candidate in inv.candidates] == [label]
 
 
 def test_raw_labels_are_immutable(db: Session) -> None:

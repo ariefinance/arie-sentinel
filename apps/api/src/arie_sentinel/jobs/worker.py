@@ -1,7 +1,7 @@
 """PostgreSQL-backed job worker (SELECT ... FOR UPDATE SKIP LOCKED).
 
 TECHNICAL CHALLENGE (recorded, resolved): the frozen stack named `procrastinate`.
-For Stage 1 the only job is fixture discovery. A small SKIP-LOCKED worker with an
+Phase 1 discovery and enrichment use a small SKIP-LOCKED worker with an
 explicit **lease** (stale-lock recovery) and bounded retries is simpler and
 dependency-free, and the `Job` table stays queue-agnostic so procrastinate can
 replace it later without touching callers. Correctness requirements met here:
@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal
 from ..models.enums import JobStatus
 from ..models.ops import Job
-from ..services.investigations import run_discovery
+from ..services.investigations import run_discovery, run_enrichment
 
 logger = logging.getLogger("arie_sentinel.worker")
 
@@ -77,6 +77,13 @@ def _dispatch(session: Session, job: Job) -> None:
     if job.job_type == "discovery":
         payload = job.payload or {}
         run_discovery(session, uuid.UUID(str(payload["investigation_id"])))
+    elif job.job_type == "enrichment":
+        payload = job.payload or {}
+        run_enrichment(
+            session,
+            uuid.UUID(str(payload["investigation_id"])),
+            uuid.UUID(str(payload["candidate_id"])),
+        )
     else:
         raise ValueError(f"unknown job_type: {job.job_type}")
 

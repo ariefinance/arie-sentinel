@@ -33,11 +33,17 @@ def _oidc_principal(token: str, settings: Settings) -> Principal:
             algorithms=["RS256", "ES256"],
             audience=settings.oidc_audience,
             issuer=settings.oidc_issuer,
+            options={"require": ["exp", "iss", "aud"]},
         )
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid bearer token.") from exc
     roles_value = claims.get(settings.oidc_roles_claim, [])
-    roles = {roles_value} if isinstance(roles_value, str) else set(roles_value)
+    if isinstance(roles_value, str):
+        roles = {roles_value}
+    elif isinstance(roles_value, list) and all(isinstance(role, str) for role in roles_value):
+        roles = set(roles_value)
+    else:
+        raise HTTPException(status_code=403, detail="Sentinel role claim is malformed.")
     if settings.oidc_manager_role in roles:
         role = Role.MANAGER
     elif settings.oidc_analyst_role in roles:
