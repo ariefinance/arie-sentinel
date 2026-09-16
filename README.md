@@ -146,7 +146,7 @@ export ARIE_DATABASE_URL="postgresql+psycopg://arie:arie@localhost:5432/arie_sen
 uv run alembic upgrade head                        # create schema + integrity guards
 uv run uvicorn arie_sentinel.main:app --reload     # http://localhost:8000  (/health, /docs)
 
-# 2b) Background worker (processes discovery jobs; run in a separate shell)
+# 2b) Background worker (processes discovery/enrichment jobs; run separately)
 uv run python -m arie_sentinel.jobs.worker
 
 # 3) Backend quality gates
@@ -162,10 +162,15 @@ pnpm lint && pnpm exec tsc --noEmit && pnpm test && pnpm build
 The app uses a clearly-isolated **development identity** (send `X-Dev-Role:
 analyst|manager`). In production, disable `ARIE_DEV_AUTH` and configure the OIDC
 issuer, audience, JWKS URL and Sentinel role mappings shown in
-[`apps/api/.env.example`](apps/api/.env.example). Set `ARIE_PROVIDER_MODE=live`
+[`apps/api/.env.example`](apps/api/.env.example). The production frontend auth
+layer must call `configureTokenProvider` with its OIDC token/role provider before
+API requests; production requests fail closed when no bearer token is available.
+Set `ARIE_PROVIDER_MODE=live`
 to use OpenCorporates, GLEIF, OpenSanctions matching, RDAP, and the configured
 structured web-search adapter. Provider responses are normalized into immutable
 source/evidence records; raw payloads are not retained. OpenSanctions business
-use requires an appropriate commercial licence. `rigour` normalization can be
+use requires an appropriate commercial licence. Live web results remain
+discovery-only until deployment supplies a connection-pinned retrieval/egress
+service; Sentinel does not perform a DNS-check-then-reresolve fetch. `rigour` normalization can be
 enabled with `uv sync --extra normalization` where ICU runtime support is
 available. All committed example data remains fictional.
