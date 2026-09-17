@@ -9,17 +9,30 @@
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { text-align: left; padding: 5px; border-bottom: 1px solid #e4e8ec; vertical-align: top; overflow-wrap: anywhere; }
     .meta { color: #56616c; font-size: 8.5pt; } .state { font-weight: bold; }
+    .demo-banner { margin: 6px 0 10px; padding: 6px 10px; border: 2px solid #b45309; background: #fff7ed; color: #7c2d12; font-weight: bold; font-size: 10pt; letter-spacing: 0.02em; }
+    .demo-note { color: #7c2d12; font-size: 8.5pt; margin: 0 0 6px; }
   </style>
 </head>
 <body>
   <h1>Counterparty Integrity Report</h1>
-  <div class="meta">Investigation {{ investigation.investigation_id }} · generated from stored, reviewable records</div>
+  {% if demo_marker %}
+  <div class="demo-banner">{{ demo_marker.banner }}</div>
+  <p class="demo-note">{{ demo_marker.note }}</p>
+  {% endif %}
+  <div class="meta">Investigation {{ investigation.investigation_id }} · Case type: {{ case_type_label }} · generated from stored, reviewable records</div>
 
   <h2>1. Subject / resolved entity</h2>
   <p><strong>Submitted company:</strong> {{ investigation.company_label }}<br>
+  <strong>Case type:</strong> {{ case_type_label }}<br>
   <strong>Resolved entity:</strong> {{ investigation.counterparty.legal_name if investigation.counterparty else "Not established" }}<br>
   <strong>Identity state:</strong> <span class="state">{{ investigation.company_identity_status.value if investigation.company_identity_status else "NOT_VERIFIED" }}</span><br>
-  <strong>Resolution basis:</strong> {{ investigation.company_match_basis or "No authoritative resolution recorded" }}</p>
+  <strong>Provider match basis:</strong> {{ investigation.company_match_basis or "No authoritative resolution recorded" }}</p>
+  {% if resolution_event %}
+  <p><strong>Analyst resolution rationale:</strong> {{ resolution_event.rationale or "Not recorded" }}<br>
+  <span class="meta">Resolved by {{ resolution_event.actor }} at {{ resolution_event.created_at }}</span></p>
+  {% else %}
+  <p><strong>Analyst resolution rationale:</strong> No analyst resolution has been recorded.</p>
+  {% endif %}
 
   <h2>2. Executive summary</h2>
   <p>The legal-entity, screening, public-source, and limitation records below reflect the evidence retained by Sentinel.{% if investigation.contact_label.strip() %} The submitted person relationship was also assessed.{% else %} No named contact was supplied, so no person relationship assessment was performed.{% endif %} Potential screening matches require analyst disposition and are not findings of identity by themselves.</p>
@@ -46,8 +59,8 @@
   <p>Completeness: {{ investigation.completeness_state.value if investigation.completeness_state else "Not assessed" }}. Missing or unavailable sources remain explicit; absence of a match is not proof of absence.</p>
 
   <h2>8. Sources</h2>
-  <table><tr><th>Source</th><th>Class</th><th>Retrieved</th></tr>
-  {% for source in sources %}<tr><td>{{ source.title }}{% if source.origin_ref %}<br><span class="meta">{{ source.origin_ref }}</span>{% endif %}</td><td>{{ source.source_class.value }}</td><td>{{ source.retrieved_at }}</td></tr>{% else %}<tr><td colspan="3">No sources retained.</td></tr>{% endfor %}</table>
+  <table><colgroup><col style="width:34%"><col style="width:16%"><col style="width:16%"><col style="width:34%"></colgroup><tr><th>Source</th><th>Class</th><th>Retrieved</th><th>Limitations</th></tr>
+  {% for source in sources %}<tr><td>{{ source.title }}{% if source.origin_ref %}<br><span class="meta">{{ source.origin_ref }}</span>{% endif %}</td><td>{{ source.source_class.value }}</td><td>{{ source.retrieved_at }}</td><td>{{ source.limitations or "—" }}</td></tr>{% else %}<tr><td colspan="4">No sources retained.</td></tr>{% endfor %}</table>
 
   <h2>9. Analyst review / audit metadata</h2>
   <p>{{ audit|length }} audit event(s) retained. Report conclusions remain traceable to the source and evidence records identified above.</p>

@@ -1,33 +1,26 @@
-"""Management-demo case classification and non-evidentiary metadata."""
+"""Management-demo case classification and non-evidentiary metadata.
+
+Thin adapter over ``demo_dataset`` (the single source of truth). Case type and
+context are derived from the same exact-alias map that drives fixture discovery,
+so the two can never drift.
+"""
 
 from __future__ import annotations
 
-from .intake.gate import normalise_label
+from .demo_dataset import (
+    FICTIONAL_TEST_CASE,
+    PUBLIC_VALIDATION_CASE,
+    lookup_demo_case,
+)
 
-PUBLIC_VALIDATION_CASE = "PUBLIC_VALIDATION_CASE"
-FICTIONAL_TEST_CASE = "FICTIONAL_TEST_CASE"
-
-_PUBLIC_ALIASES = {"arie finance", "arie finance ltd"}
-_FICTIONAL_ALIASES = {
-    "vantar - castellan",
-    "vantar energy trading",
-    "castellan trading",
-    "orion petro trading",
-    "pacific energy procurement ltd",
-    "atlas global fuels",
-    "northstar petroleum trading",
-    "meridian energy supplies ltd",
-}
+__all__ = ["FICTIONAL_TEST_CASE", "PUBLIC_VALIDATION_CASE", "demo_case_context"]
 
 
 def demo_case_context(company_label: str) -> dict[str, str]:
     """Return display/context metadata only for explicitly supported demo cases."""
-    normalized = normalise_label(company_label)
-    if normalized in _PUBLIC_ALIASES:
-        return {
-            "demo_case_type": PUBLIC_VALIDATION_CASE,
-            "website": "https://www.ariefinance.com",
-        }
-    if normalized in _FICTIONAL_ALIASES:
-        return {"demo_case_type": FICTIONAL_TEST_CASE}
-    return {}
+    case = lookup_demo_case(company_label)
+    if case is None:
+        return {}
+    context: dict[str, str] = {"demo_case_type": case.case_type}
+    context.update(case.context)
+    return context

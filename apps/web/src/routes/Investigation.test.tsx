@@ -106,15 +106,117 @@ test('loads tabs, shows provenance, and resolves a selected candidate', async ()
   expect(screen.queryByRole('button', { name: 'Final Report →' })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'COMPANY' }));
   expect(await screen.findByText('Example Public Company Ltd')).toBeInTheDocument();
+  // B2: an analyst-authored rationale plus an explicit confirm are required.
+  await userEvent.type(
+    screen.getByLabelText('Resolution rationale'),
+    'Registry identifier and jurisdiction verified',
+  );
   await userEvent.click(screen.getByRole('button', { name: 'Select entity' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm selection' }));
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/resolve-entity'),
       expect.objectContaining({ method: 'POST' }),
     ),
   );
+  const resolveCall = fetchMock.mock.calls.find(([url]) =>
+    String(url).includes('/resolve-entity'),
+  );
+  const resolveBody = JSON.parse(String((resolveCall?.[1] as RequestInit).body));
+  expect(resolveBody.rationale).toBe('Registry identifier and jurisdiction verified');
   await userEvent.click(screen.getByRole('button', { name: 'View sources' }));
   expect(await screen.findByText('Registry candidate')).toBeInTheDocument();
+});
+
+test('B2: entity resolution is blocked until an analyst rationale is entered', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings'))
+      return new Response('[]');
+    return new Response(JSON.stringify(investigation));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('Example Public Company')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'COMPANY' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Select entity' }));
+  // No rationale entered: an error is shown and no resolve request is made.
+  expect(await screen.findByText(/at least 10 characters/i)).toBeInTheDocument();
+  expect(
+    fetchMock.mock.calls.some(([url]) => String(url).includes('/resolve-entity')),
+  ).toBe(false);
+});
+
+test('B2: a screening disposition requires an analyst-authored rationale and confirm', async () => {
+  const screeningResult = {
+    screening_result_id: 'scr-1',
+    subject_label: 'Northstar Petroleum Trading Ltd',
+    list_or_source: 'Sanctions screening (fictional fixture)',
+    state: 'POTENTIAL_MATCH',
+    match_basis: 'name similarity only',
+    matched_profile_id: 'fixture-profile-victor-lane-01',
+    match_score: 0.78,
+    match_explanation: null,
+    matched_identifiers: null,
+    datasets: ['fictional-demo-screening-list'],
+    source_id: 'src-1',
+    analyst_disposition: null,
+    analyst_rationale: null,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/screening') && init?.method !== 'POST')
+      return new Response(JSON.stringify([screeningResult]));
+    if (url.endsWith('/sources') || url.endsWith('/findings')) return new Response('[]');
+    if (url.includes('/review') && init?.method === 'POST')
+      return new Response(JSON.stringify({ ...screeningResult, analyst_disposition: 'FALSE_POSITIVE' }));
+    return new Response(JSON.stringify({ ...investigation, screening_state: 'POTENTIAL_MATCH' }));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('Example Public Company')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'SCREENING' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Mark false positive' }));
+  // Confirm is disabled until a sufficient rationale is authored.
+  const confirm = screen.getByRole('button', { name: 'Confirm false positive' });
+  expect(confirm).toBeDisabled();
+  await userEvent.type(
+    screen.getByLabelText('Rationale for Northstar Petroleum Trading Ltd'),
+    'Date of birth and identifiers do not match the sanctioned profile',
+  );
+  expect(confirm).toBeEnabled();
+  await userEvent.click(confirm);
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/review'),
+      expect.objectContaining({ method: 'POST' }),
+    ),
+  );
+  const reviewCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/review'));
+  const reviewBody = JSON.parse(String((reviewCall?.[1] as RequestInit).body));
+  expect(reviewBody.disposition).toBe('FALSE_POSITIVE');
+  expect(reviewBody.rationale).toBe(
+    'Date of birth and identifiers do not match the sanctioned profile',
+  );
 });
 
 test.each([

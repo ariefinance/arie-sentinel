@@ -42,9 +42,18 @@ from ..models.enums import (
 from ..models.evidence import Evidence, Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent, Job
 from ..providers import DemoDatasetUnsupported, ProviderUnavailable
-from ..providers.base import CandidateEntity, ScreeningSubject
+from ..providers.base import (
+    CandidateEntity,
+    ProviderInvalidResponse,
+    ScreeningSubject,
+)
 from ..providers.factory import Providers, build_providers
 from ..providers.normalization import normalize_entity_name
+
+# A material source that could not be reached OR returned malformed data is
+# handled the same way: an explicit source-unavailable/limited state, never a
+# crash and never fabricated results.
+_SOURCE_FAILURE = (ProviderUnavailable, ProviderInvalidResponse)
 
 _THIRD_PARTY_DOMAIN_SUFFIXES = (
     "facebook.com",
@@ -207,7 +216,7 @@ def run_discovery(
             payload={"investigation_state": inv.investigation_state.value},
         )
         return
-    except ProviderUnavailable as exc:
+    except _SOURCE_FAILURE as exc:
         inv.investigation_state = InvestigationState.SOURCE_UNAVAILABLE
         inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
         inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
@@ -218,7 +227,10 @@ def run_discovery(
             object_type="investigation",
             investigation_id=inv.investigation_id,
             rationale=str(exc),
-            payload={"investigation_state": inv.investigation_state.value},
+            payload={
+                "investigation_state": inv.investigation_state.value,
+                "failure": type(exc).__name__,
+            },
         )
         return
 
@@ -244,27 +256,50 @@ def run_discovery(
         is_public_validation = (inv.case_context or {}).get(
             "demo_case_type"
         ) == PUBLIC_VALIDATION_CASE
+        fixture_mode = get_settings().provider_mode == "fixture"
+        if is_public_validation:
+            # Curated citation of a real public registry listing (no live capture).
+            registry_captured_by = (
+                "fixture:public_registry_citation" if fixture_mode else "adapter:corporate_registry"
+            )
+            registry_limitations = (
+                "Curated citation of an official public listing prepared for the management demo; "
+                "not a live registry capture. It confirms the legal name and registration "
+                "identifier but does not state current legal or regulatory status. Analyst "
+                "resolution is still required."
+                if fixture_mode
+                else (
+                    "Official public listing confirms the legal name and registration identifier; "
+                    "it does not state current legal or regulatory status. Analyst resolution is "
+                    "still required."
+                )
+            )
+            registry_license = "public-government-source"
+            registry_extracted_by = (
+                "fixture:public_registry_citation" if fixture_mode else "adapter:corporate_registry"
+            )
+        elif fixture_mode:
+            registry_captured_by = "fixture:corporate_registry"
+            registry_limitations = (
+                "Fictional fixture registry record prepared for the management demo; not a live "
+                "registry capture. Candidate until authoritative analyst resolution."
+            )
+            registry_license = "fixture-non-live"
+            registry_extracted_by = "fixture:corporate_registry"
+        else:
+            registry_captured_by = "adapter:corporate_registry"
+            registry_limitations = "Search result is a candidate until authoritative resolution."
+            registry_license = "provider-normalized"
+            registry_extracted_by = "adapter:corporate_registry"
         source = Source(
             investigation_id=inv.investigation_id,
             source_class=SourceClass.CORPORATE_REGISTRY,
             title=f"Registry candidate: {candidate.legal_name}",
             origin_ref=candidate.source_ref,
             retrieved_at=retrieved_at,
-            captured_by=(
-                "adapter:public_validation_registry"
-                if is_public_validation
-                else "adapter:corporate_registry"
-            ),
-            limitations=(
-                "Official public listing confirms the legal name and registration identifier; "
-                "it does not state current legal or regulatory status. Analyst resolution is "
-                "still required."
-                if is_public_validation
-                else "Search result is a candidate until authoritative resolution."
-            ),
-            license_class=(
-                "public-government-source" if is_public_validation else "provider-normalized"
-            ),
+            captured_by=registry_captured_by,
+            limitations=registry_limitations,
+            license_class=registry_license,
         )
         session.add(source)
         session.flush()
@@ -279,7 +314,7 @@ def run_discovery(
                     "registered_address": candidate.registered_address,
                     "incorporation_date": candidate.incorporation_date,
                 },
-                extracted_by="adapter:corporate_registry",
+                extracted_by=registry_extracted_by,
                 extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
             )
         )
@@ -391,7 +426,7 @@ def run_enrichment(
     if candidate.lei and gleif is not None:
         try:
             gleif_data = gleif.lookup_lei(candidate.lei)
-        except ProviderUnavailable as exc:
+        except _SOURCE_FAILURE as exc:
             gleif_data = None
             investigation.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
             record_audit(
@@ -509,7 +544,7 @@ def _corroborate_contact(
         officers = discover_officers(
             investigation.contact_label, entity.jurisdiction, entity.registry_id
         )
-    except ProviderUnavailable as exc:
+    except _SOURCE_FAILURE as exc:
         investigation.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
         record_audit(
             session,
@@ -633,7 +668,7 @@ def _run_screening(
     }
     try:
         result_sets = [(subject, providers.screening.screen(subject)) for subject in subjects]
-    except ProviderUnavailable as exc:
+    except _SOURCE_FAILURE as exc:
         inv.screening_state = None
         inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
         record_audit(
@@ -720,7 +755,7 @@ def _run_public_intelligence(
     evidence_ids: list[uuid.UUID] = []
     try:
         result_sets = [providers.web.search(query) for query in queries]
-    except ProviderUnavailable as exc:
+    except _SOURCE_FAILURE as exc:
         inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
         record_audit(
             session,
@@ -738,29 +773,49 @@ def _run_public_intelligence(
             seen.add(result.url)
             try:
                 page = providers.web.retrieve(result.url)
-            except ProviderUnavailable:
+            except _SOURCE_FAILURE:
                 page = None
             captured = page is not None
+            # A curated demo summary is NOT a live capture: label its provenance
+            # so nobody can infer Sentinel downloaded the page (M1).
+            curated = bool(page and page.curated)
+            if curated:
+                web_captured_by = "fixture:curated_summary"
+                if inv.case_type == PUBLIC_VALIDATION_CASE:
+                    web_limitations = (
+                        "Curated summary of a public page prepared for the management demo; "
+                        "not a live page capture."
+                    )
+                else:
+                    web_limitations = (
+                        "Fictional fixture source prepared for the management demo; "
+                        "no live page was retrieved."
+                    )
+                web_license = "fixture-non-live"
+            elif captured:
+                web_captured_by = "adapter:web_retrieval"
+                web_limitations = (
+                    "Captured public page; discovery terms do not imply adverse content."
+                )
+                web_license = "linked-public-source"
+            else:
+                web_captured_by = "adapter:web_search:discovery"
+                web_limitations = (
+                    "Discovery lead only: underlying page was not captured; "
+                    "search snippet is not evidence."
+                )
+                web_license = "linked-public-source"
             source = Source(
                 investigation_id=inv.investigation_id,
                 source_class=SourceClass.WEB_PUBLIC,
                 title=result.title,
                 origin_ref=result.url,
                 retrieved_at=_parse_time(page.retrieved_at if page else result.retrieved_at),
-                captured_by=(
-                    "adapter:web_retrieval" if captured else "adapter:web_search:discovery"
-                ),
+                captured_by=web_captured_by,
                 content_ref=page.url if page else None,
                 content_hash=page.content_hash if page else None,
-                limitations=(
-                    "Captured public page; discovery terms do not imply adverse content."
-                    if captured
-                    else (
-                        "Discovery lead only: underlying page was not captured; "
-                        "search snippet is not evidence."
-                    )
-                ),
-                license_class="linked-public-source",
+                limitations=web_limitations,
+                license_class=web_license,
             )
             session.add(source)
             session.flush()
@@ -773,8 +828,11 @@ def _run_public_intelligence(
                         "published_at": result.published_at,
                         "content_type": page.content_type,
                         "captured_url": page.url,
+                        "curated": curated,
                     },
-                    extracted_by="adapter:web_retrieval",
+                    extracted_by=(
+                        "fixture:curated_summary" if curated else "adapter:web_retrieval"
+                    ),
                     extraction_confidence=ExtractionConfidence.REPORTED,
                 )
                 session.add(evidence)
@@ -783,7 +841,7 @@ def _run_public_intelligence(
     for domain, association_basis in _claimed_company_domains(inv).items():
         try:
             domain_record = providers.domain.lookup(domain)
-        except ProviderUnavailable as exc:
+        except _SOURCE_FAILURE as exc:
             domain_record = None
             inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
             record_audit(
