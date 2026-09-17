@@ -1,8 +1,9 @@
-"""Deterministic fixture providers for Stage 1.
+"""Deterministic fixture providers for the management demo.
 
-They use the canonical fictional fixtures plus one deliberately documented
-public validation record for ARIE Finance Ltd. No network calls are made and
-unsupported labels fail with an explicit non-live dataset limitation.
+Corporate discovery is driven entirely by ``demo_dataset.DEMO_CASES`` and matches
+ONLY on an exact normalised alias — no token, substring, or fuzzy matching — so an
+unsupported real company name can never fall into fictional fixture logic. Web
+"pages" are curated demo summaries, explicitly flagged as non-live captures.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 
+from ..demo_dataset import CURATION_DATE, DEMO_CASES
 from ..intake.gate import normalise_label
 from .base import (
     CandidateEntity,
@@ -23,163 +25,23 @@ from .base import (
     WebResult,
 )
 
-_VANTAR_FZE = CandidateEntity(
-    legal_name="Vantar Energy Trading FZE",
-    jurisdiction="AE",
-    registry_class="uae_free_zone",
-    registry_id="12345",
-    status="Active",
-    incorporation_date="2025-02-14",
-    match_basis="registration number + jurisdiction match",
-)
-_VANTAR_LTD = CandidateEntity(
-    legal_name="Vantar Energy Trading Ltd",
-    jurisdiction="GB",
-    registry_class="companies_house",
-    registry_id="09876543",
-    status="Active",
-    match_basis="name + jurisdiction (registry number differs)",
-)
-_VANTAR_LLC = CandidateEntity(
-    legal_name="Vantar Energy Trading LLC",
-    jurisdiction="US-DE",
-    registry_class="us_state_registry",
-    registry_id="DE-LLC-2025",
-    status="Active",
-    match_basis="name only — weak",
-)
-_CASTELLAN = CandidateEntity(
-    legal_name="Castellan Trading FZE",
-    jurisdiction="AE",
-    registry_class="uae_free_zone",
-    registry_id="22345",
-    status="Active",
-    incorporation_date="2024-06-01",
-    match_basis="registration number + jurisdiction match",
-)
-
-# Fictional commodities-counterparty scenarios used by the management demo.
-_ORION_AE = CandidateEntity(
-    legal_name="Orion Petro Trading FZE",
-    jurisdiction="AE",
-    registry_class="uae_free_zone",
-    registry_id="OPT-41001",
-    status="Active",
-    incorporation_date="2019-04-18",
-    registered_address="Demo Trade Centre, Dubai, AE",
-    match_basis="name + jurisdiction; analyst selection required",
-)
-_ORION_GB = CandidateEntity(
-    legal_name="Orion Petro Trading Ltd",
-    jurisdiction="GB",
-    registry_class="companies_house",
-    registry_id="14200101",
-    status="Active",
-    incorporation_date="2021-09-03",
-    registered_address="10 Fictional Wharf, London, GB",
-    match_basis="name match; different jurisdiction and registry identifier",
-)
-_ORION_SG = CandidateEntity(
-    legal_name="Orion Petro Trading Pte. Ltd.",
-    jurisdiction="SG",
-    registry_class="acra",
-    registry_id="202200101Z",
-    status="Active",
-    incorporation_date="2022-01-10",
-    registered_address="1 Example Quay, Singapore",
-    match_basis="name match; different jurisdiction and registry identifier",
-)
-_PACIFIC = CandidateEntity(
-    legal_name="Pacific Energy Procurement Ltd",
-    jurisdiction="SG",
-    registry_class="acra",
-    registry_id="201800202P",
-    status="Active",
-    incorporation_date="2018-06-12",
-    registered_address="20 Demo Harbour Road, Singapore",
-    match_basis="exact legal name + jurisdiction + registry identifier",
-)
-_ATLAS = CandidateEntity(
-    legal_name="Atlas Global Fuels FZE",
-    jurisdiction="AE",
-    registry_class="uae_free_zone",
-    registry_id="AGF-52003",
-    status="Active",
-    incorporation_date="2020-11-08",
-    registered_address="5 Fictional Free Zone, Fujairah, AE",
-    match_basis="exact legal name + jurisdiction + registry identifier",
-)
-_NORTHSTAR = CandidateEntity(
-    legal_name="Northstar Petroleum Trading Ltd",
-    jurisdiction="GB",
-    registry_class="companies_house",
-    registry_id="15100404",
-    status="Active",
-    incorporation_date="2023-02-21",
-    registered_address="24 Example Street, London, GB",
-    match_basis="exact legal name + jurisdiction + registry identifier",
-)
-_MERIDIAN = CandidateEntity(
-    legal_name="Meridian Energy Supplies Ltd",
-    jurisdiction="GB",
-    registry_class="companies_house",
-    registry_id="13700505",
-    status="Active",
-    incorporation_date="2020-07-15",
-    registered_address="8 Test Square, London, GB",
-    match_basis="exact legal name + jurisdiction + registry identifier",
-)
-
-_ARIE_FINANCE = CandidateEntity(
-    legal_name="ARIE Finance Ltd",
-    jurisdiction="MU",
-    registry_class="mauritius_corporate_and_business_registration",
-    registry_id="C221997",
-    status="Current status not established from cited source",
-    alternative_names=("ARIE Finance",),
-    source_ref=(
-        "https://companies.govmu.org/Communique/"
-        "List%20of%20Companies%20with%20Registration%20Fees%20Due%202026%20"
-        "as%20at%2016%20December%202025.pdf"
-    ),
-    retrieved_at="2026-09-16T00:00:00Z",
-    match_basis=(
-        "exact legal name + Mauritius company registration identifier in an official public "
-        "corporate-registry publication"
-    ),
-)
-
 
 class FixtureCorporateRegistryProvider:
-    """Deterministic registry lookup over the canonical fictional entities."""
+    """Deterministic registry lookup over the exact supported demo aliases."""
 
     def discover_candidates(self, company_label: str) -> list[CandidateEntity]:
         norm = normalise_label(company_label)
         tokens = set(re.findall(r"[a-z0-9]+", norm))
 
-        if "unavailable" in tokens:  # scenario S8 trigger
+        # Deliberate provider-unavailable simulator (scenario S8): the sentinel
+        # token "unavailable" exercises the SOURCE_UNAVAILABLE path. It is not a
+        # curated company and never returns fixture data.
+        if "unavailable" in tokens:
             raise ProviderUnavailable("corporate_registry: fixture source unavailable")
 
-        # Combined "Vantar - Castellan" resolves to a single legal entity.
-        if "vantar" in tokens and "castellan" in tokens:
-            return [_VANTAR_FZE]
-        if "castellan" in tokens:
-            return [_CASTELLAN]
-        # Bare "Vantar" / "Vantar Energy Trading" is ambiguous across jurisdictions.
-        if "vantar" in tokens:
-            return [_VANTAR_FZE, _VANTAR_LTD, _VANTAR_LLC]
-        if "orion" in tokens and "petro" in tokens:
-            return [_ORION_AE, _ORION_GB, _ORION_SG]
-        if "pacific" in tokens and "procurement" in tokens:
-            return [_PACIFIC]
-        if "atlas" in tokens and "fuels" in tokens:
-            return [_ATLAS]
-        if "northstar" in tokens and "petroleum" in tokens:
-            return [_NORTHSTAR]
-        if "meridian" in tokens and "energy" in tokens:
-            return [_MERIDIAN]
-        if norm in {"arie finance", "arie finance ltd"}:
-            return [_ARIE_FINANCE]
+        case = DEMO_CASES.get(norm)
+        if case is not None:
+            return list(case.candidates)
         raise DemoDatasetUnsupported(
             "Not available in the management-demo dataset. Live registry/provider search is "
             "disabled in this management environment. Use one of the demonstration cases or "
@@ -191,8 +53,8 @@ class FixtureCorporateRegistryProvider:
     ) -> list[dict[str, str | None]]:
         if (
             normalise_label(person_name) == "daniel kim"
-            and jurisdiction == _PACIFIC.jurisdiction
-            and company_number == _PACIFIC.registry_id
+            and jurisdiction == "SG"
+            and company_number == "201800202P"
         ):
             return [
                 {
@@ -247,7 +109,7 @@ class FixtureScreeningProvider:
                     matched_identifiers={"name": ["Victor Lane"]},
                     datasets=("fictional-demo-screening-list",),
                     source_ref="https://screening.example.test/entities/victor-lane-01",
-                    retrieved_at="2026-09-16T00:00:00Z",
+                    retrieved_at=CURATION_DATE,
                 )
             )
         return hits
@@ -273,7 +135,7 @@ class FixtureWebResearchProvider:
                     title="Vantar Energy Trading — About",
                     url="https://vantar-energy.test/about",
                     excerpt="Operating in energy trading since 2011.",
-                    retrieved_at="2026-09-04T00:00:00Z",
+                    retrieved_at=CURATION_DATE,
                 )
             ]
         pages = {
@@ -305,7 +167,7 @@ class FixtureWebResearchProvider:
                         title=title,
                         url=url,
                         excerpt=excerpt,
-                        retrieved_at="2026-09-16T00:00:00Z",
+                        retrieved_at=CURATION_DATE,
                     )
                 ]
         if "arie finance" in norm:
@@ -317,14 +179,14 @@ class FixtureWebResearchProvider:
                         "Company-controlled public website identifying ARIE Finance Ltd and its "
                         "stated Mauritius regulatory information."
                     ),
-                    retrieved_at="2026-09-16T00:00:00Z",
+                    retrieved_at=CURATION_DATE,
                     publisher="ARIE Finance Ltd",
                 ),
                 WebResult(
                     title="FSC Mauritius — Payment Intermediary Services licence class",
                     url="https://www.fscmauritius.org/licensing-supervision/codified-list",
                     excerpt="Official regulator description of licence class FS-2.9.",
-                    retrieved_at="2026-09-16T00:00:00Z",
+                    retrieved_at=CURATION_DATE,
                     publisher="Financial Services Commission, Mauritius",
                 ),
             ]
@@ -363,12 +225,15 @@ class FixtureWebResearchProvider:
         content = content_by_url.get(url)
         if content is None:
             return None
+        # curated=True: this is a demo summary prepared offline, NOT a live capture.
+        # The consumer stamps honest provenance from this flag (see investigations).
         return RetrievedPage(
             url=url,
             content=content,
             content_hash=hashlib.sha256(content.encode()).hexdigest(),
             content_type="text/plain",
-            retrieved_at="2026-09-04T00:00:00Z",
+            retrieved_at=CURATION_DATE,
+            curated=True,
         )
 
 

@@ -19,9 +19,19 @@ import { humanizeState, identityTone, investigationTone, screeningTone } from '.
 const TABS = ['SUMMARY', 'FINDINGS', 'COMPANY', 'PERSON', 'SCREENING'] as const;
 type Tab = (typeof TABS)[number];
 const when = (value: string) => new Date(value).toLocaleString();
+// Minimum analyst-authored rationale length; mirrors the server-side minimum so
+// the UI never submits a decision the API would reject.
+const MIN_RATIONALE = 10;
 const caseTypeLabel = (value: string | null): string | null => {
   if (value === 'PUBLIC_VALIDATION_CASE') return 'Public Validation Case';
   if (value === 'FICTIONAL_TEST_CASE') return 'Fictional Test Case';
+  return null;
+};
+const nonLiveNote = (value: string | null): string | null => {
+  if (value === 'FICTIONAL_TEST_CASE')
+    return 'Non-live management demo: fictional fixture data, not a live screening result.';
+  if (value === 'PUBLIC_VALIDATION_CASE')
+    return 'Non-live management demo: public-source validation only; live screening was not performed.';
   return null;
 };
 
@@ -36,9 +46,9 @@ export function Investigation() {
   const reviewFinding = useReviewFinding(id);
   const [tab, setTab] = useState<Tab>('SUMMARY');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [rationale, setRationale] = useState(
-    'Selected after reviewing registry identifiers and jurisdiction.',
-  );
+  // Resolution rationale starts EMPTY and must be analyst-authored (B2).
+  const [rationale, setRationale] = useState('');
+  const [pendingCandidate, setPendingCandidate] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmFinalise, setConfirmFinalise] = useState(false);
   const isManager = api.getCurrentRole() === 'manager';
@@ -66,6 +76,25 @@ export function Investigation() {
   const data = investigation.data;
   const liveScreeningNotPerformed =
     data.case_type === 'PUBLIC_VALIDATION_CASE' && data.screening_state === null;
+  const demoNote = nonLiveNote(data.case_type);
+
+  function requestSelect(candidateId: string) {
+    setActionError(null);
+    if (rationale.trim().length < MIN_RATIONALE) {
+      setActionError(
+        `Enter a resolution rationale of at least ${MIN_RATIONALE} characters before selecting an entity.`,
+      );
+      return;
+    }
+    setPendingCandidate(candidateId);
+  }
+
+  function confirmSelect(candidateId: string) {
+    resolve.mutate(
+      { candidateId, rationale: rationale.trim() },
+      { onSettled: () => setPendingCandidate(null) },
+    );
+  }
 
   async function downloadReport() {
     setActionError(null);
@@ -96,6 +125,11 @@ export function Investigation() {
           />
           <Fact label="Contact" value={data.contact_label.trim() || 'No contact supplied'} />
         </div>
+        {demoNote ? (
+          <p className="banner" role="note">
+            {demoNote}
+          </p>
+        ) : null}
         <div className="case-header__states">
           <StatusPill
             dimension="Investigation"
@@ -215,6 +249,7 @@ export function Investigation() {
                   Resolution rationale
                   <textarea
                     value={rationale}
+                    placeholder="Explain, in your own words, why this candidate is the correct legal entity."
                     onChange={(event) => setRationale(event.target.value)}
                   />
                 </label>
@@ -252,21 +287,37 @@ export function Investigation() {
                             {when(candidate.retrieved_at)}
                           </td>
                           <td>
-                            <Button
-                              disabled={
-                                !candidate.registry_id ||
-                                !candidate.jurisdiction ||
-                                resolve.isPending
-                              }
-                              onClick={() =>
-                                resolve.mutate({
-                                  candidateId: candidate.entity_candidate_id,
-                                  rationale,
-                                })
-                              }
-                            >
-                              Select entity
-                            </Button>
+                            {pendingCandidate === candidate.entity_candidate_id ? (
+                              <>
+                                <p className="cell-muted">
+                                  Confirm you authored the rationale above for this selection.
+                                </p>
+                                <Button
+                                  variant="primary"
+                                  disabled={
+                                    !candidate.registry_id ||
+                                    !candidate.jurisdiction ||
+                                    resolve.isPending ||
+                                    rationale.trim().length < MIN_RATIONALE
+                                  }
+                                  onClick={() => confirmSelect(candidate.entity_candidate_id)}
+                                >
+                                  Confirm selection
+                                </Button>{' '}
+                                <Button onClick={() => setPendingCandidate(null)}>Cancel</Button>
+                              </>
+                            ) : (
+                              <Button
+                                disabled={
+                                  !candidate.registry_id ||
+                                  !candidate.jurisdiction ||
+                                  resolve.isPending
+                                }
+                                onClick={() => requestSelect(candidate.entity_candidate_id)}
+                              >
+                                Select entity
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -326,30 +377,21 @@ export function Investigation() {
                 </p>
                 <p>Lists: {item.list_or_source}</p>
                 <p>Disposition: {item.analyst_disposition ?? 'Pending review'}</p>
-                <Button
-                  onClick={() =>
+                <DispositionForm
+                  subject={item.subject_label}
+                  options={[
+                    { value: 'FALSE_POSITIVE', label: 'false positive' },
+                    { value: 'CONFIRMED_MATCH', label: 'confirmed match' },
+                  ]}
+                  disabled={reviewScreening.isPending}
+                  onSubmit={(disposition, ownRationale) =>
                     reviewScreening.mutate({
                       resultId: item.screening_result_id,
-                      disposition: 'FALSE_POSITIVE',
-                      rationale:
-                        'Analyst reviewed the identifiers and determined this is not the subject.',
+                      disposition,
+                      rationale: ownRationale,
                     })
                   }
-                >
-                  Mark false positive
-                </Button>{' '}
-                <Button
-                  onClick={() =>
-                    reviewScreening.mutate({
-                      resultId: item.screening_result_id,
-                      disposition: 'CONFIRMED_MATCH',
-                      rationale:
-                        'Analyst corroborated the matched identifiers against retained evidence.',
-                    })
-                  }
-                >
-                  Confirm match
-                </Button>
+                />
               </article>
             ))}
             {screening.data?.length === 0 ? (
@@ -364,7 +406,9 @@ export function Investigation() {
               ) : (
                 <p>
                   {data.screening_state === 'NO_MATERIAL_MATCH'
-                    ? 'Screening completed with no material matches.'
+                    ? data.case_type === 'FICTIONAL_TEST_CASE'
+                      ? 'Fictional screening scenario completed with no material fixture matches.'
+                      : 'Screening completed with no material matches.'
                     : data.completeness_state === 'MATERIAL_SOURCE_UNAVAILABLE'
                       ? 'Screening was not completed because the provider was unavailable.'
                       : 'Screening has not completed yet.'}
@@ -388,28 +432,21 @@ export function Investigation() {
                   <strong>Action:</strong> {item.action_text}
                 </p>
                 <p>Review: {item.review_status}</p>
-                <Button
-                  onClick={() =>
+                <DispositionForm
+                  subject={item.title}
+                  options={[
+                    { value: 'CONFIRMED', label: 'confirm' },
+                    { value: 'DISMISSED', label: 'dismiss' },
+                  ]}
+                  disabled={reviewFinding.isPending}
+                  onSubmit={(disposition, ownRationale) =>
                     reviewFinding.mutate({
                       findingId: item.finding_id,
-                      disposition: 'CONFIRMED',
-                      rationale: 'Analyst reviewed the linked evidence and confirms this finding.',
+                      disposition,
+                      rationale: ownRationale,
                     })
                   }
-                >
-                  Confirm
-                </Button>{' '}
-                <Button
-                  onClick={() =>
-                    reviewFinding.mutate({
-                      findingId: item.finding_id,
-                      disposition: 'DISMISSED',
-                      rationale: 'Analyst reviewed the linked evidence and dismisses this finding.',
-                    })
-                  }
-                >
-                  Dismiss
-                </Button>
+                />
               </article>
             ))}
           </section>
@@ -443,6 +480,78 @@ export function Investigation() {
         )}
         {sources.data?.length === 0 ? <p>No sources retained yet.</p> : null}
       </EvidenceDrawer>
+    </div>
+  );
+}
+
+interface DispositionOption {
+  value: string;
+  label: string;
+}
+
+// A two-step, analyst-authored disposition: choose a disposition, type your own
+// rationale, then explicitly confirm. Nothing is submitted on a single click and
+// no rationale text is pre-filled (B2).
+function DispositionForm({
+  subject,
+  options,
+  disabled,
+  onSubmit,
+}: {
+  subject: string;
+  options: DispositionOption[];
+  disabled: boolean;
+  onSubmit: (disposition: string, rationale: string) => void;
+}) {
+  const [pending, setPending] = useState<DispositionOption | null>(null);
+  const [rationale, setRationale] = useState('');
+  const tooShort = rationale.trim().length < MIN_RATIONALE;
+
+  if (!pending) {
+    return (
+      <div className="disposition">
+        {options.map((option) => (
+          <Button
+            key={option.value}
+            disabled={disabled}
+            onClick={() => {
+              setRationale('');
+              setPending(option);
+            }}
+          >
+            {`Mark ${option.label}`}
+          </Button>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="disposition">
+      <label>
+        {`Rationale for “${subject}” — ${pending.label}`}
+        <textarea
+          aria-label={`Rationale for ${subject}`}
+          value={rationale}
+          placeholder="Enter your own rationale (min 10 characters). This is recorded as the audit rationale."
+          onChange={(event) => setRationale(event.target.value)}
+        />
+      </label>
+      <Button
+        variant="primary"
+        disabled={disabled || tooShort}
+        onClick={() => onSubmit(pending.value, rationale.trim())}
+      >
+        {`Confirm ${pending.label}`}
+      </Button>{' '}
+      <Button
+        onClick={() => {
+          setPending(null);
+          setRationale('');
+        }}
+      >
+        Cancel
+      </Button>
     </div>
   );
 }

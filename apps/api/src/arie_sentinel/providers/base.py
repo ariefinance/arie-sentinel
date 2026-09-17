@@ -105,6 +105,9 @@ class RetrievedPage:
     content_hash: str
     content_type: str
     retrieved_at: str
+    # True when the "page" is a curated demo summary, not a live network capture.
+    # Live providers always leave this False so real captures are labelled honestly.
+    curated: bool = False
 
 
 @dataclass(frozen=True)

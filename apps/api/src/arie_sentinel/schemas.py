@@ -121,9 +121,14 @@ class HealthOut(BaseModel):
     database: str
 
 
+# Minimum analyst-authored rationale length. Proportionate: enough to reject
+# throwaway text ("ok", "yes", "done") as audit rationale, not an essay.
+MIN_RATIONALE_LENGTH = 10
+
+
 class ResolveEntityRequest(BaseModel):
     candidate_id: uuid.UUID
-    rationale: str = Field(min_length=3, max_length=2000)
+    rationale: str = Field(min_length=MIN_RATIONALE_LENGTH, max_length=2000)
 
 
 class FinaliseReportRequest(BaseModel):
@@ -132,7 +137,7 @@ class FinaliseReportRequest(BaseModel):
 
 class ReviewRequest(BaseModel):
     disposition: str = Field(min_length=3, max_length=32)
-    rationale: str = Field(min_length=3, max_length=2000)
+    rationale: str = Field(min_length=MIN_RATIONALE_LENGTH, max_length=2000)
 
 
 class SourceOut(BaseModel):

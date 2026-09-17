@@ -22,8 +22,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from ..audit import record_audit
 from ..db import SessionLocal
-from ..models.enums import JobStatus
+from ..models.core import Investigation
+from ..models.enums import AuditAction, InvestigationState, JobStatus
 from ..models.ops import Job
 from ..services.investigations import run_discovery, run_enrichment
 
@@ -113,33 +115,91 @@ def run_pending_jobs(session: Session, *, max_jobs: int = 100) -> int:
         except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
             session.rollback()
             reloaded = session.get(Job, job_id)
+            terminal = False
             if reloaded is not None:
                 reloaded.last_error = f"{type(exc).__name__}: {exc}"
-                reloaded.status = (
-                    JobStatus.FAILED
-                    if reloaded.attempts >= reloaded.max_attempts
-                    else JobStatus.PENDING
-                )
+                terminal = reloaded.attempts >= reloaded.max_attempts
+                reloaded.status = JobStatus.FAILED if terminal else JobStatus.PENDING
                 reloaded.locked_at = None
                 reloaded.locked_by = None
                 session.commit()
+            if terminal and reloaded is not None:
+                _mark_investigation_failed(session, reloaded, exc)
             logger.warning("job %s failed: %s", job_id, exc)
         processed += 1
     return processed
 
 
-def run_worker(poll_interval: float = 2.0, *, run_once: bool = False) -> None:
-    """Long-running worker loop. Safe to run as multiple concurrent processes."""
+def _mark_investigation_failed(session: Session, job: Job, exc: Exception) -> None:
+    """On terminal job failure, surface it on the investigation and audit it.
+
+    A terminally failed discovery/enrichment job must not leave the investigation
+    stuck in a non-terminal state (NOT_STARTED/RUNNING/PARTIAL_RESULTS) with no
+    explanation. The confirmed legal entity, if any, is preserved; only the
+    lifecycle state moves to FAILED.
+    """
+    payload = job.payload or {}
+    raw_id = payload.get("investigation_id")
+    if not raw_id:
+        return
+    try:
+        investigation_id = uuid.UUID(str(raw_id))
+    except (ValueError, TypeError):
+        return
+    investigation = session.get(Investigation, investigation_id)
+    if investigation is None or investigation.investigation_state is InvestigationState.FAILED:
+        return
+    investigation.investigation_state = InvestigationState.FAILED
+    record_audit(
+        session,
+        actor="worker",
+        action=AuditAction.STATE_CHANGE,
+        object_type="investigation",
+        investigation_id=investigation_id,
+        rationale=f"{job.job_type} job failed after {job.attempts} attempt(s): {exc}",
+        payload={"investigation_state": InvestigationState.FAILED.value, "job_type": job.job_type},
+    )
+    session.commit()
+
+
+def run_worker(
+    poll_interval: float = 2.0,
+    *,
+    run_once: bool = False,
+    max_cycles: int | None = None,
+    error_backoff: float = 5.0,
+) -> None:
+    """Long-running worker loop. Safe to run as multiple concurrent processes.
+
+    A transient error in polling/claim/reclaim (a DB blip outside a single job's
+    dispatch) must not kill the worker: the cycle is logged, the session rolled
+    back, and the loop continues after a bounded backoff. ``max_cycles`` bounds
+    the loop for tests; ``None`` runs indefinitely.
+    """
     logger.info("worker %s starting (lease=%s)", WORKER_ID, LEASE)
+    cycles = 0
     while True:
+        processed = 0
+        errored = False
         session = SessionLocal()
         try:
             processed = run_pending_jobs(session)
+        except Exception as exc:  # noqa: BLE001 - logged, not swallowed; worker survives
+            errored = True
+            try:
+                session.rollback()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                logger.exception("worker %s failed to roll back after cycle error", WORKER_ID)
+            logger.warning("worker %s cycle failed, continuing: %s", WORKER_ID, exc)
         finally:
             session.close()
-        if run_once:
+        cycles += 1
+        if run_once or (max_cycles is not None and cycles >= max_cycles):
             return
-        if processed == 0:
+        if errored:
+            if error_backoff:
+                time.sleep(error_backoff)
+        elif processed == 0:
             time.sleep(poll_interval)
 
 
