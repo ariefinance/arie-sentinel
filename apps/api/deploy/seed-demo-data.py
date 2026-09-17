@@ -6,7 +6,10 @@ from arie_sentinel.config import Settings
 from arie_sentinel.db import SessionLocal
 from arie_sentinel.demo_cases import demo_case_context
 from arie_sentinel.models.core import Investigation
-from arie_sentinel.services.investigations import create_investigation
+from arie_sentinel.services.investigations import (
+    create_investigation,
+    mark_public_validation_screening_not_performed,
+)
 
 settings = Settings()
 if settings.env.lower() == "demo" and settings.provider_mode == "fixture":
@@ -32,6 +35,8 @@ if settings.env.lower() == "demo" and settings.provider_mode == "fixture":
                 for key, value in demo_case_context(company_label).items():
                     context.setdefault(key, value)
                 existing.case_context = context or None
+                if context.get("demo_case_type") == "PUBLIC_VALIDATION_CASE":
+                    mark_public_validation_screening_not_performed(session, existing)
                 continue
             create_investigation(
                 session,

@@ -123,7 +123,9 @@ export function Cases() {
       key: 'screening_state',
       header: 'Screening',
       render: (row) =>
-        row.screening_state ? (
+        row.case_type === 'PUBLIC_VALIDATION_CASE' && !row.screening_state ? (
+          <span className="cell-muted">Live screening not performed</span>
+        ) : row.screening_state ? (
           <StatusPill
             label={humanizeState(row.screening_state)}
             tone={screeningTone(row.screening_state)}

@@ -59,6 +59,11 @@ _THIRD_PARTY_DOMAIN_SUFFIXES = (
     "duckduckgo.com",
 )
 
+PUBLIC_VALIDATION_SCREENING_LIMITATION = (
+    "Live sanctions/PEP screening was not performed in this management environment. "
+    "No live screening conclusion is available."
+)
+
 
 def get_or_create_counterparty(
     session: Session, candidate: CandidateEntity | EntityCandidate
@@ -377,7 +382,10 @@ def run_enrichment(
 
     investigation.investigation_state = InvestigationState.RUNNING
     active_providers = providers or build_providers(get_settings())
-    _run_screening(session, investigation, active_providers, candidate)
+    if _public_validation_uses_fixture_providers(investigation):
+        mark_public_validation_screening_not_performed(session, investigation)
+    else:
+        _run_screening(session, investigation, active_providers, candidate)
     _corroborate_contact(session, investigation, candidate, active_providers)
     gleif = getattr(active_providers, "gleif", None)
     if candidate.lei and gleif is not None:
@@ -442,6 +450,41 @@ def run_enrichment(
         target_ref=str(candidate_id),
         payload={"status": "completed"},
     )
+
+
+def _public_validation_uses_fixture_providers(investigation: Investigation) -> bool:
+    """Return true when a real public case would otherwise use fictional screening."""
+    return (
+        get_settings().provider_mode == "fixture"
+        and investigation.case_type == PUBLIC_VALIDATION_CASE
+    )
+
+
+def mark_public_validation_screening_not_performed(
+    session: Session, investigation: Investigation
+) -> None:
+    """Persist and audit that fixture screening is invalid for a public validation case."""
+    investigation.screening_state = None
+    if investigation.completeness_state is None:
+        investigation.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+    existing = session.scalar(
+        select(AuditEvent.event_id).where(
+            AuditEvent.investigation_id == investigation.investigation_id,
+            AuditEvent.object_type == "screening",
+            AuditEvent.target_ref == "live-screening-not-performed",
+        )
+    )
+    if existing is None:
+        record_audit(
+            session,
+            actor="system:demo_boundary",
+            action=AuditAction.STATE_CHANGE,
+            object_type="screening",
+            investigation_id=investigation.investigation_id,
+            target_ref="live-screening-not-performed",
+            rationale=PUBLIC_VALIDATION_SCREENING_LIMITATION,
+            payload={"status": "not_performed", "provider_mode": "fixture"},
+        )
 
 
 def _parse_time(value: str | None) -> datetime:

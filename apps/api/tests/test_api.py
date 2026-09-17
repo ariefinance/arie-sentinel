@@ -140,6 +140,41 @@ def test_public_validation_aliases_and_unknown_demo_company(client: TestClient) 
         assert candidate["legal_name"] == "ARIE Finance Ltd"
         assert candidate["jurisdiction"] == "MU"
         assert candidate["registry_id"] == "C221997"
+        resolved = client.post(
+            f"/investigations/{created.json()['investigation_id']}/resolve-entity",
+            json={
+                "candidate_id": candidate["entity_candidate_id"],
+                "rationale": "Public registration identifier and jurisdiction checked",
+            },
+            headers=ANALYST,
+        )
+        assert resolved.status_code == 200, resolved.text
+        _drain_jobs()
+        enriched = client.get(
+            f"/investigations/{created.json()['investigation_id']}", headers=ANALYST
+        ).json()
+        assert enriched["company_identity_status"] == "CONFIRMED"
+        assert enriched["screening_state"] is None
+        assert enriched["candidates"] == []
+        assert (
+            client.get(
+                f"/investigations/{created.json()['investigation_id']}/screening",
+                headers=ANALYST,
+            ).json()
+            == []
+        )
+        sources = client.get(
+            f"/investigations/{created.json()['investigation_id']}/sources", headers=ANALYST
+        ).json()
+        assert sources
+        assert all(source["source_class"] != "sanctions_pep_screening" for source in sources)
+        report = client.post(
+            f"/investigations/{created.json()['investigation_id']}/report",
+            json={"confirm_finalise": True},
+            headers=MANAGER,
+        )
+        assert report.status_code == 200, report.text
+        assert report.content.startswith(b"%PDF")
 
     unknown = client.post(
         "/investigations",

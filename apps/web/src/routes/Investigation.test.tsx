@@ -203,6 +203,52 @@ test('shows no person assessment when no contact was supplied', async () => {
   expect(screen.queryByText('Unverified')).not.toBeInTheDocument();
 });
 
+test('shows live screening as not performed for a public validation case', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
+      return new Response('[]');
+    }
+    return new Response(
+      JSON.stringify({
+        ...investigation,
+        company_label: 'ARIE Finance',
+        contact_label: '',
+        case_type: 'PUBLIC_VALIDATION_CASE',
+        candidates: [],
+        screening_state: null,
+      }),
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('ARIE Finance')).toBeInTheDocument();
+  expect(
+    screen.getByRole('status', { name: 'Screening: Live screening not performed (neutral)' }),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'SCREENING' }));
+  expect(
+    await screen.findByRole('heading', { name: 'Live screening not performed', level: 3 }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      'Sanctions/PEP providers are disabled in this management environment. No live screening conclusion is available.',
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText('Screening completed with no material matches.'),
+  ).not.toBeInTheDocument();
+});
+
 test('labels an unsupported demo company as not searched', async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);

@@ -64,6 +64,8 @@ export function Investigation() {
     );
   }
   const data = investigation.data;
+  const liveScreeningNotPerformed =
+    data.case_type === 'PUBLIC_VALIDATION_CASE' && data.screening_state === null;
 
   async function downloadReport() {
     setActionError(null);
@@ -111,7 +113,11 @@ export function Investigation() {
           />
           <StatusPill
             dimension="Screening"
-            label={humanizeState(data.screening_state ?? 'NOT_STARTED')}
+            label={
+              liveScreeningNotPerformed
+                ? 'Live screening not performed'
+                : humanizeState(data.screening_state ?? 'NOT_STARTED')
+            }
             tone={screeningTone(data.screening_state)}
           />
         </div>
@@ -347,13 +353,23 @@ export function Investigation() {
               </article>
             ))}
             {screening.data?.length === 0 ? (
-              <p>
-                {data.screening_state === 'NO_MATERIAL_MATCH'
-                  ? 'Screening completed with no material matches.'
-                  : data.completeness_state === 'MATERIAL_SOURCE_UNAVAILABLE'
-                    ? 'Screening was not completed because the provider was unavailable.'
-                    : 'Screening has not completed yet.'}
-              </p>
+              liveScreeningNotPerformed ? (
+                <div>
+                  <h3>Live screening not performed</h3>
+                  <p>
+                    Sanctions/PEP providers are disabled in this management environment. No live
+                    screening conclusion is available.
+                  </p>
+                </div>
+              ) : (
+                <p>
+                  {data.screening_state === 'NO_MATERIAL_MATCH'
+                    ? 'Screening completed with no material matches.'
+                    : data.completeness_state === 'MATERIAL_SOURCE_UNAVAILABLE'
+                      ? 'Screening was not completed because the provider was unavailable.'
+                      : 'Screening has not completed yet.'}
+                </p>
+              )
             ) : null}
           </section>
         ) : null}
