@@ -8,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from arie_sentinel.config import Settings
-from arie_sentinel.models.core import EntityCandidate
+from arie_sentinel.models.core import EntityCandidate, Investigation
 from arie_sentinel.models.enums import (
     CompletenessState,
+    IntakeState,
+    InvestigationState,
     PersonEvidenceStatus,
     RelationshipState,
     ScreeningState,
@@ -215,6 +217,26 @@ def test_zero_screening_is_distinct_from_provider_unavailable(db: Session) -> No
     assert unavailable.completeness_state is CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
     assert screening_summary(unavailable, []) == (
         "Screening was not completed because a required source was unavailable."
+    )
+
+
+def test_public_validation_report_does_not_infer_fixture_screening(db: Session) -> None:
+    investigation = Investigation(
+        company_label="ARIE Finance",
+        contact_label="",
+        intake_state=IntakeState.SUFFICIENT_FOR_DISCOVERY,
+        investigation_state=InvestigationState.COMPLETED,
+        completeness_state=CompletenessState.COMPLETE_WITH_LIMITATIONS,
+        screening_state=None,
+        case_context={"demo_case_type": "PUBLIC_VALIDATION_CASE"},
+        created_by="manager@example.test",
+    )
+    db.add(investigation)
+    db.flush()
+
+    assert screening_summary(investigation, []) == (
+        "Live sanctions/PEP screening was not performed in this management-demo environment. "
+        "No screening conclusion should be inferred."
     )
 
 

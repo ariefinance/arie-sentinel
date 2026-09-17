@@ -3,6 +3,7 @@
 from .base import (
     CandidateEntity,
     CorporateRegistryProvider,
+    DemoDatasetUnsupported,
     DomainProvider,
     DomainRecord,
     ProviderError,
@@ -15,6 +16,7 @@ from .base import (
 
 __all__ = [
     "CandidateEntity",
+    "DemoDatasetUnsupported",
     "DomainRecord",
     "ScreeningHit",
     "WebResult",

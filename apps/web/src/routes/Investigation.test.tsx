@@ -10,6 +10,7 @@ const investigation = {
   investigation_id: 'case-1',
   company_label: 'Example Public Company',
   contact_label: 'Example Public Person',
+  case_type: null,
   intake_state: 'SUFFICIENT_FOR_DISCOVERY',
   clarification_reason: null,
   investigation_state: 'COMPLETED',
@@ -121,15 +122,17 @@ test.each([
     screeningState: 'NO_MATERIAL_MATCH',
     completeness: 'COMPLETE_WITH_LIMITATIONS',
     message: 'Screening completed with no material matches.',
+    statusLabel: 'Screening: No material match (confirmed)',
   },
   {
     screeningState: null,
     completeness: 'MATERIAL_SOURCE_UNAVAILABLE',
     message: 'Screening was not completed because the provider was unavailable.',
+    statusLabel: 'Screening: Not started (neutral)',
   },
 ])(
   'shows the correct empty-screening status: $message',
-  async ({ screeningState, completeness, message }) => {
+  async ({ screeningState, completeness, message, statusLabel }) => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
@@ -157,5 +160,128 @@ test.each([
     expect(await screen.findByText('Example Public Company')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'SCREENING' }));
     expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: statusLabel })).toBeInTheDocument();
   },
 );
+
+test('shows no person assessment when no contact was supplied', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
+      return new Response('[]');
+    }
+    return new Response(
+      JSON.stringify({
+        ...investigation,
+        contact_label: '',
+        candidates: [],
+        company_identity_status: 'CONFIRMED',
+      }),
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('No contact supplied')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'PERSON' }));
+  expect(
+    await screen.findByText(
+      (_content, element) =>
+        element?.tagName === 'P' &&
+        element.textContent?.includes('Named contact: Not supplied') === true &&
+        element.textContent?.includes('Person relationship: Not assessed') === true,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.queryByText('Unverified')).not.toBeInTheDocument();
+});
+
+test('shows live screening as not performed for a public validation case', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
+      return new Response('[]');
+    }
+    return new Response(
+      JSON.stringify({
+        ...investigation,
+        company_label: 'ARIE Finance',
+        contact_label: '',
+        case_type: 'PUBLIC_VALIDATION_CASE',
+        candidates: [],
+        screening_state: null,
+      }),
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('ARIE Finance')).toBeInTheDocument();
+  expect(
+    screen.getByRole('status', { name: 'Screening: Live screening not performed (neutral)' }),
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'SCREENING' }));
+  expect(
+    await screen.findByRole('heading', { name: 'Live screening not performed', level: 3 }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      'Sanctions/PEP providers are disabled in this management environment. No live screening conclusion is available.',
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText('Screening completed with no material matches.'),
+  ).not.toBeInTheDocument();
+});
+
+test('labels an unsupported demo company as not searched', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/sources') || url.endsWith('/screening') || url.endsWith('/findings')) {
+      return new Response('[]');
+    }
+    return new Response(
+      JSON.stringify({
+        ...investigation,
+        company_label: 'Unknown Example Holdings',
+        contact_label: '',
+        candidates: [],
+        entity_candidates: [],
+        investigation_state: 'SOURCE_UNAVAILABLE',
+        company_identity_status: null,
+        clarification_reason:
+          'Not available in the management-demo dataset. Live registry/provider search is disabled.',
+      }),
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  expect(
+    await screen.findByText('Not available in the management-demo dataset'),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText('Not searched').length).toBeGreaterThan(0);
+});

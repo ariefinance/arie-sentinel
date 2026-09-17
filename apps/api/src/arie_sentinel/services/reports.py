@@ -8,13 +8,19 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..demo_cases import PUBLIC_VALIDATION_CASE
 from ..models.core import Investigation
-from ..models.enums import CompletenessState, ScreeningState
+from ..models.enums import CompletenessState, ScreeningState, SourceClass
 from ..models.evidence import Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
 
 
 def screening_summary(investigation: Investigation, screening: list[ScreeningResult]) -> str | None:
+    if investigation.case_type == PUBLIC_VALIDATION_CASE and investigation.screening_state is None:
+        return (
+            "Live sanctions/PEP screening was not performed in this management-demo "
+            "environment. No screening conclusion should be inferred."
+        )
     if screening:
         return None
     if investigation.screening_state is ScreeningState.NO_MATERIAL_MATCH:
@@ -34,6 +40,12 @@ def render_report(session: Session, investigation: Investigation) -> bytes:
         .where(Source.investigation_id == investigation.investigation_id)
         .order_by(Source.retrieved_at.asc())
     ).all()
+    if investigation.case_type == PUBLIC_VALIDATION_CASE and investigation.screening_state is None:
+        sources = [
+            source
+            for source in sources
+            if source.source_class is not SourceClass.SANCTIONS_PEP_SCREENING
+        ]
     findings = session.scalars(
         select(Finding).where(Finding.investigation_id == investigation.investigation_id)
     ).all()
@@ -42,6 +54,8 @@ def render_report(session: Session, investigation: Investigation) -> bytes:
             ScreeningResult.investigation_id == investigation.investigation_id
         )
     ).all()
+    if investigation.case_type == PUBLIC_VALIDATION_CASE and investigation.screening_state is None:
+        screening = []
     audit = session.scalars(
         select(AuditEvent).where(AuditEvent.investigation_id == investigation.investigation_id)
     ).all()

@@ -162,9 +162,15 @@ jobs:
       - name: Validate pilot service definition
         env:
           POSTGRES_PASSWORD: ci-placeholder-only
+          BASIC_AUTH_HTPASSWD: "sentinel-ci:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M="
         run: |
           cp .env.example .env
           docker compose -f compose.pilot.yml config --quiet
+
+          if env -u BASIC_AUTH_HTPASSWD docker compose -f compose.pilot.yml config --quiet; then
+            echo "Compose unexpectedly accepted a missing Basic Auth secret."
+            exit 1
+          fi
 
       - name: Build API and worker image
         run: docker build -t arie-sentinel-api:ci apps/api
@@ -175,6 +181,7 @@ jobs:
       - name: Smoke test packaged stack
         env:
           POSTGRES_PASSWORD: ci-placeholder-only
+          BASIC_AUTH_HTPASSWD: "sentinel-demo:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M="
         run: |
           cat > .env <<'EOF'
           ARIE_ENV=test
@@ -203,16 +210,20 @@ jobs:
 
           proxy_ready=false
           for attempt in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:8080/api/health; then
+            if curl --fail --silent --show-error --user sentinel-demo:test \
+              http://127.0.0.1:8080/api/health; then
               proxy_ready=true
               break
             fi
             sleep 2
           done
           "$proxy_ready"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:8080/api/health)" = "401"
 
       - name: Clean up packaged stack
         if: always()
         env:
           POSTGRES_PASSWORD: ci-placeholder-only
+          BASIC_AUTH_HTPASSWD: "sentinel-demo:{SHA}qUqP5cyxm6YcTAhz05Hph5gvu9M="
         run: docker compose -f compose.pilot.yml down -v --remove-orphans

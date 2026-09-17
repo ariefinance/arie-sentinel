@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session, selectinload
 from ..audit import record_audit
 from ..auth import Principal, get_current_principal, require_manager
 from ..db import get_db
+from ..demo_cases import PUBLIC_VALIDATION_CASE
 from ..models.core import EntityCandidate, Investigation
-from ..models.enums import AuditAction, CompanyIdentityStatus
+from ..models.enums import AuditAction, CompanyIdentityStatus, SourceClass
 from ..models.evidence import Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
 from ..schemas import (
@@ -98,12 +99,14 @@ def get_sources(
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ) -> list[SourceOut]:
-    _load(db, investigation_id)
+    investigation = _load(db, investigation_id)
     rows = db.scalars(
         select(Source)
         .where(Source.investigation_id == investigation_id)
         .order_by(Source.retrieved_at.desc())
     ).all()
+    if investigation.case_type == PUBLIC_VALIDATION_CASE and investigation.screening_state is None:
+        rows = [row for row in rows if row.source_class is not SourceClass.SANCTIONS_PEP_SCREENING]
     return [SourceOut.model_validate(row) for row in rows]
 
 
@@ -113,7 +116,9 @@ def get_screening(
     db: Session = Depends(get_db),
     principal: Principal = Depends(get_current_principal),
 ) -> list[ScreeningResultOut]:
-    _load(db, investigation_id)
+    investigation = _load(db, investigation_id)
+    if investigation.case_type == PUBLIC_VALIDATION_CASE and investigation.screening_state is None:
+        return []
     rows = db.scalars(
         select(ScreeningResult)
         .where(ScreeningResult.investigation_id == investigation_id)

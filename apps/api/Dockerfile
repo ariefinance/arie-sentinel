@@ -15,6 +15,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY deploy ./deploy
 
 RUN useradd --create-home --uid 10001 sentinel \
     && chown -R sentinel:sentinel /app

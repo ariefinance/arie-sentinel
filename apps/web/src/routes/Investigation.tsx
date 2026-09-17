@@ -19,6 +19,11 @@ import { humanizeState, identityTone, investigationTone, screeningTone } from '.
 const TABS = ['SUMMARY', 'FINDINGS', 'COMPANY', 'PERSON', 'SCREENING'] as const;
 type Tab = (typeof TABS)[number];
 const when = (value: string) => new Date(value).toLocaleString();
+const caseTypeLabel = (value: string | null): string | null => {
+  if (value === 'PUBLIC_VALIDATION_CASE') return 'Public Validation Case';
+  if (value === 'FICTIONAL_TEST_CASE') return 'Fictional Test Case';
+  return null;
+};
 
 export function Investigation() {
   const { id = '' } = useParams();
@@ -59,6 +64,8 @@ export function Investigation() {
     );
   }
   const data = investigation.data;
+  const liveScreeningNotPerformed =
+    data.case_type === 'PUBLIC_VALIDATION_CASE' && data.screening_state === null;
 
   async function downloadReport() {
     setActionError(null);
@@ -80,11 +87,14 @@ export function Investigation() {
       <header className="case-header">
         <div className="case-header__identity">
           <Fact label="Raw label" value={data.company_label} />
+          {caseTypeLabel(data.case_type) ? (
+            <Fact label="Case type" value={caseTypeLabel(data.case_type) ?? ''} />
+          ) : null}
           <Fact
             label="Resolved entity"
             value={data.counterparty?.legal_name ?? 'Not yet resolved'}
           />
-          <Fact label="Contact" value={data.contact_label} />
+          <Fact label="Contact" value={data.contact_label.trim() || 'No contact supplied'} />
         </div>
         <div className="case-header__states">
           <StatusPill
@@ -94,12 +104,20 @@ export function Investigation() {
           />
           <StatusPill
             dimension="Legal entity"
-            label={humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')}
+            label={
+              data.investigation_state === 'SOURCE_UNAVAILABLE' && data.clarification_reason
+                ? 'Not searched'
+                : humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')
+            }
             tone={identityTone(data.company_identity_status)}
           />
           <StatusPill
             dimension="Screening"
-            label={humanizeState(data.screening_state ?? 'NOT_STARTED')}
+            label={
+              liveScreeningNotPerformed
+                ? 'Live screening not performed'
+                : humanizeState(data.screening_state ?? 'NOT_STARTED')
+            }
             tone={screeningTone(data.screening_state)}
           />
         </div>
@@ -128,6 +146,12 @@ export function Investigation() {
           <Button onClick={() => setDrawerOpen(true)}>View sources</Button>
         </div>
         {actionError ? <p className="banner banner--error">{actionError}</p> : null}
+        {data.investigation_state === 'SOURCE_UNAVAILABLE' && data.clarification_reason ? (
+          <div className="banner" role="status">
+            <strong>Not available in the management-demo dataset</strong>
+            <span>{data.clarification_reason}</span>
+          </div>
+        ) : null}
       </header>
 
       <nav className="tabs" aria-label="Case sections">
@@ -147,9 +171,18 @@ export function Investigation() {
         {tab === 'SUMMARY' ? (
           <section className="panel">
             <h2 className="panel__title">Summary</h2>
-            <p>Identity: {humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')}</p>
+            <p>
+              Identity:{' '}
+              {data.investigation_state === 'SOURCE_UNAVAILABLE' && data.clarification_reason
+                ? 'Not searched'
+                : humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')}
+            </p>
             <p>Completeness: {humanizeState(data.completeness_state ?? 'NOT ASSESSED')}</p>
-            <p>{data.company_match_basis ?? 'No authoritative resolution has been recorded.'}</p>
+            <p>
+              {data.clarification_reason ??
+                data.company_match_basis ??
+                'No authoritative resolution has been recorded.'}
+            </p>
             <p>
               <Link to="/cases">← Back to worklist</Link>
             </p>
@@ -239,7 +272,9 @@ export function Investigation() {
                       ))}
                       {data.entity_candidates.length === 0 ? (
                         <tr>
-                          <td colSpan={4}>No registry candidates were found.</td>
+                          <td colSpan={4}>
+                            {data.clarification_reason ?? 'No registry candidates were found.'}
+                          </td>
                         </tr>
                       ) : null}
                     </tbody>
@@ -267,6 +302,13 @@ export function Investigation() {
                 ) : null}
               </article>
             ))}
+            {data.candidates.length === 0 ? (
+              <p>
+                <strong>Named contact:</strong> Not supplied
+                <br />
+                <strong>Person relationship:</strong> Not assessed
+              </p>
+            ) : null}
           </section>
         ) : null}
 
@@ -311,13 +353,23 @@ export function Investigation() {
               </article>
             ))}
             {screening.data?.length === 0 ? (
-              <p>
-                {data.screening_state === 'NO_MATERIAL_MATCH'
-                  ? 'Screening completed with no material matches.'
-                  : data.completeness_state === 'MATERIAL_SOURCE_UNAVAILABLE'
-                    ? 'Screening was not completed because the provider was unavailable.'
-                    : 'Screening has not completed yet.'}
-              </p>
+              liveScreeningNotPerformed ? (
+                <div>
+                  <h3>Live screening not performed</h3>
+                  <p>
+                    Sanctions/PEP providers are disabled in this management environment. No live
+                    screening conclusion is available.
+                  </p>
+                </div>
+              ) : (
+                <p>
+                  {data.screening_state === 'NO_MATERIAL_MATCH'
+                    ? 'Screening completed with no material matches.'
+                    : data.completeness_state === 'MATERIAL_SOURCE_UNAVAILABLE'
+                      ? 'Screening was not completed because the provider was unavailable.'
+                      : 'Screening has not completed yet.'}
+                </p>
+              )
             ) : null}
           </section>
         ) : null}

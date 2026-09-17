@@ -6,7 +6,8 @@
     @page { size: A4; margin: 18mm; }
     body { font: 10pt Arial, sans-serif; color: #17212b; line-height: 1.45; }
     h1 { font-size: 20pt; margin-bottom: 4px; } h2 { font-size: 13pt; margin-top: 22px; border-bottom: 1px solid #ccd4dc; }
-    table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 5px; border-bottom: 1px solid #e4e8ec; vertical-align: top; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { text-align: left; padding: 5px; border-bottom: 1px solid #e4e8ec; vertical-align: top; overflow-wrap: anywhere; }
     .meta { color: #56616c; font-size: 8.5pt; } .state { font-weight: bold; }
   </style>
 </head>
@@ -21,14 +22,18 @@
   <strong>Resolution basis:</strong> {{ investigation.company_match_basis or "No authoritative resolution recorded" }}</p>
 
   <h2>2. Executive summary</h2>
-  <p>The legal-entity, person relationship, screening, public-source, and limitation records below reflect the evidence retained by Sentinel. Potential screening matches require analyst disposition and are not findings of identity by themselves.</p>
+  <p>The legal-entity, screening, public-source, and limitation records below reflect the evidence retained by Sentinel.{% if investigation.contact_label.strip() %} The submitted person relationship was also assessed.{% else %} No named contact was supplied, so no person relationship assessment was performed.{% endif %} Potential screening matches require analyst disposition and are not findings of identity by themselves.</p>
 
   <h2>3. Company identity</h2>
   {% if investigation.counterparty %}<p>{{ investigation.counterparty.legal_name }} · {{ investigation.counterparty.jurisdiction or "jurisdiction unavailable" }} · {{ investigation.counterparty.registry_id or "registry number unavailable" }} · {{ investigation.counterparty.status or "status unavailable" }}</p>{% else %}<p>Could not establish a resolved legal entity.</p>{% endif %}
 
   <h2>4. Named person / relationship</h2>
+  {% if investigation.contact_label.strip() %}
   <p><strong>Submitted contact:</strong> {{ investigation.contact_label }}</p>
   {% for person in investigation.candidates %}<p>{{ person.label_fragment }} — {{ person.relationship_state.value if person.relationship_state else "UNVERIFIED" }}{% if person.match_basis %}: {{ person.match_basis }}{% endif %}{% if person.relationship_state and person.relationship_state.value == "VERIFIED" %}<br><em>This verifies a registry relationship for a person with this name, not the physical identity of the submitted individual.</em>{% endif %}</p>{% else %}<p>No person candidate was derived.</p>{% endfor %}
+  {% else %}
+  <p><strong>Submitted contact:</strong> Not supplied<br><strong>Person relationship:</strong> Not assessed</p>
+  {% endif %}
 
   <h2>5. Screening</h2>
   <table><tr><th>Subject</th><th>Potential match / basis</th><th>Disposition</th></tr>

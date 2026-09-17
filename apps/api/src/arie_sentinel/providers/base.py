@@ -26,6 +26,10 @@ class ProviderInvalidResponse(ProviderError):
     """The provider returned a response that did not satisfy its contract."""
 
 
+class DemoDatasetUnsupported(ProviderError):
+    """The non-live management demo has no configured record for this label."""
+
+
 @dataclass(frozen=True)
 class CandidateEntity:
     """A candidate legal entity returned by discovery/registry lookup."""
