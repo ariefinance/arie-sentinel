@@ -189,3 +189,51 @@ DEMO_CASES: dict[str, DemoCase] = {
 def lookup_demo_case(company_label: str) -> DemoCase | None:
     """Return the DemoCase for an EXACT supported alias, else None."""
     return DEMO_CASES.get(normalise_label(company_label))
+
+
+# --- Management-demo seed selection --------------------------------------------------
+#
+# Which supported cases the deployment seeder preloads, and their canonical labels,
+# originate HERE — not in a separate list inside the seeder — so the seeder and the
+# canonical dataset cannot drift (B1). Each label MUST be a supported alias in
+# DEMO_CASES; iter_seed_cases() enforces that. Adding a seedable demo company is done
+# by adding it to DEMO_CASES and listing its canonical label here.
+SEED_CASE_LABELS: tuple[str, ...] = (
+    "Orion Petro Trading",
+    "Pacific Energy Procurement Ltd",
+    "Atlas Global Fuels",
+    "Northstar Petroleum Trading",
+    "Meridian Energy Supplies Ltd",
+    "ARIE Finance",
+)
+
+# Optional demo contact person per seed case. Contacts are scenario INPUTS, not
+# corporate-identity aliases, so they are kept as separate metadata keyed by the
+# canonical seed label. A seed case with no entry is preloaded company-only, so a
+# new seedable company never requires editing this mapping.
+SEED_CONTACTS: dict[str, str] = {
+    "Orion Petro Trading": "Karim Mansour",
+    "Pacific Energy Procurement Ltd": "Daniel Kim",
+    "Atlas Global Fuels": "Michael Grant",
+    "Northstar Petroleum Trading": "Victor Lane",
+    "Meridian Energy Supplies Ltd": "Amira Hassan",
+}
+
+
+def iter_seed_cases() -> list[tuple[str, str, str]]:
+    """Return ``(company_label, contact_label, case_type)`` per management-demo seed case.
+
+    Company identity and case type come from the canonical ``DEMO_CASES``; the contact
+    is optional scenario metadata. Raises ``RuntimeError`` if a seed label is not a
+    supported case, so the seeder can never silently drift from the canonical dataset.
+    """
+    cases: list[tuple[str, str, str]] = []
+    for label in SEED_CASE_LABELS:
+        case = lookup_demo_case(label)
+        if case is None:
+            raise RuntimeError(
+                f"Seed label {label!r} is not a supported demo case in DEMO_CASES; "
+                "add it to the canonical dataset instead of maintaining a separate list."
+            )
+        cases.append((label, SEED_CONTACTS.get(label, ""), case.case_type))
+    return cases

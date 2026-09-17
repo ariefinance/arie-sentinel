@@ -22,7 +22,17 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from arie_sentinel import demo_dataset
 from arie_sentinel.db import SessionLocal
+from arie_sentinel.demo_dataset import (
+    DEMO_CASES,
+    FICTIONAL_TEST_CASE,
+    SEED_CASE_LABELS,
+    SEED_CONTACTS,
+    iter_seed_cases,
+    lookup_demo_case,
+    normalise_label,
+)
 from arie_sentinel.jobs import worker
 from arie_sentinel.jobs.worker import run_pending_jobs
 from arie_sentinel.models.core import Counterparty, EntityCandidate, Investigation
@@ -370,3 +380,47 @@ def test_invalid_registry_response_is_source_unavailable(db: Session) -> None:
     run_discovery(db, inv.investigation_id, providers=SimpleNamespace(registry=_InvalidRegistry()))
     assert inv.investigation_state is InvestigationState.SOURCE_UNAVAILABLE
     assert inv.completeness_state is CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+
+
+# --- B1 consistency: single-source deployment seeding --------------------------------
+
+
+def test_every_seeded_company_is_a_canonical_demo_case() -> None:
+    seed_cases = iter_seed_cases()
+    assert seed_cases  # the demo preloads at least one case
+    for company_label, _contact, case_type in seed_cases:
+        case = lookup_demo_case(company_label)
+        # Company identity + case type originate from the canonical dataset.
+        assert case is not None, company_label
+        assert case.case_type == case_type
+        assert normalise_label(company_label) in DEMO_CASES
+
+
+def test_seed_contacts_cannot_introduce_a_company() -> None:
+    # Contacts are optional scenario metadata; every contact key is a seed case,
+    # so a contact entry can never add a company the canonical dataset does not have.
+    assert set(SEED_CONTACTS).issubset(set(SEED_CASE_LABELS))
+
+
+def test_a_canonical_case_becomes_seedable_without_a_second_company_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # "Castellan Trading" is already a supported canonical alias but is not seeded.
+    # Listing it in the canonical seed selection is sufficient to seed it — no
+    # separate company list to edit, and a contact is optional (company-only).
+    monkeypatch.setattr(demo_dataset, "SEED_CASE_LABELS", (*SEED_CASE_LABELS, "Castellan Trading"))
+    seeded = {label: (contact, case_type) for label, contact, case_type in iter_seed_cases()}
+    assert "Castellan Trading" in seeded
+    assert seeded["Castellan Trading"] == ("", FICTIONAL_TEST_CASE)
+
+
+def test_seeder_cannot_silently_drift_from_canonical_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A seed label that is not a supported canonical case fails loudly rather than
+    # seeding an unsupported company.
+    monkeypatch.setattr(
+        demo_dataset, "SEED_CASE_LABELS", (*SEED_CASE_LABELS, "Unsupported Example Holdings")
+    )
+    with pytest.raises(RuntimeError, match="not a supported demo case"):
+        iter_seed_cases()
