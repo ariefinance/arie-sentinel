@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '../components/primitives/Button';
 import { EvidenceDrawer } from '../components/primitives/EvidenceDrawer';
@@ -8,6 +9,7 @@ import { ErrorState, LoadingState } from '../components/primitives/StateBlocks';
 import { StatusPill } from '../components/primitives/StatusPill';
 import { api } from '../lib/api';
 import {
+  queryKeys,
   useBoard,
   useFindings,
   useGraph,
@@ -52,12 +54,35 @@ export function Investigation() {
   const board = useBoard(id, tab === 'BOARD');
   const graph = useGraph(id, tab === 'MAP');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Row-specific evidence drill-down: which source ids + which check opened the drawer.
+  const [drawerSelection, setDrawerSelection] = useState<{ ids: string[]; label: string } | null>(
+    null,
+  );
   // Resolution rationale starts EMPTY and must be analyst-authored (B2).
   const [rationale, setRationale] = useState('');
   const [pendingCandidate, setPendingCandidate] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmFinalise, setConfirmFinalise] = useState(false);
   const isManager = api.getCurrentRole() === 'manager';
+
+  // Progressive investigation: useInvestigation polls while the state is non-terminal;
+  // when the worker advances it, refetch the derived views so completed evidence,
+  // board rows, graph, findings and screening appear without a manual refresh.
+  const queryClient = useQueryClient();
+  const investigationState = investigation.data?.investigation_state;
+  useEffect(() => {
+    if (!id) return;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.board(id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.graph(id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.findings(id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.screening(id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sources(id) });
+  }, [id, investigationState, queryClient]);
+
+  function openSources(ids: string[], label: string) {
+    setDrawerSelection(ids.length > 0 ? { ids, label } : null);
+    setDrawerOpen(true);
+  }
 
   if (investigation.isPending) {
     return (
@@ -189,7 +214,7 @@ export function Investigation() {
           ) : (
             <span>Manager finalisation required</span>
           )}
-          <Button onClick={() => setDrawerOpen(true)}>View sources</Button>
+          <Button onClick={() => openSources([], 'All sources')}>View sources</Button>
         </div>
         {actionError ? <p className="banner banner--error">{actionError}</p> : null}
         {data.investigation_state === 'SOURCE_UNAVAILABLE' && data.clarification_reason ? (
@@ -215,23 +240,30 @@ export function Investigation() {
 
       <div className="case__body">
         {tab === 'BOARD' ? (
-          board.isPending ? (
+          board.isError ? (
+            <ErrorState
+              title="Investigation Board unavailable"
+              message="The board could not be loaded. This is a technical failure, not an absence of findings."
+              onRetry={() => void board.refetch()}
+            />
+          ) : board.isPending ? (
             <LoadingState label="Building the investigation board…" rows={6} />
           ) : (
-            <InvestigationBoard
-              rows={board.data?.rows ?? []}
-              onOpenSources={() => setDrawerOpen(true)}
-            />
+            <InvestigationBoard rows={board.data?.rows ?? []} onOpenSources={openSources} />
           )
         ) : null}
 
         {tab === 'MAP' ? (
-          graph.isPending ? (
+          graph.isError ? (
+            <ErrorState
+              title="Relationship data unavailable"
+              message="The relationship map could not be loaded. This is a technical failure, not an absence of relationships."
+              onRetry={() => void graph.refetch()}
+            />
+          ) : graph.isPending ? (
             <LoadingState label="Building the relationship map…" rows={4} />
           ) : (
-            <RelationshipMap
-              graph={graph.data ?? { investigation_id: id, nodes: [], edges: [] }}
-            />
+            <RelationshipMap graph={graph.data ?? { investigation_id: id, nodes: [], edges: [] }} />
           )
         ) : null}
 
@@ -476,29 +508,65 @@ export function Investigation() {
       <EvidenceDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title="Sources and provenance"
+        title={
+          drawerSelection ? `Sources: ${drawerSelection.label}` : 'Sources and provenance'
+        }
       >
-        {sources.isPending ? (
+        {sources.isError ? (
+          <ErrorState
+            title="Sources unavailable"
+            message="Provenance could not be loaded — this is a technical failure, not an absence of sources."
+            onRetry={() => void sources.refetch()}
+          />
+        ) : sources.isPending ? (
           <LoadingState label="Loading sources…" rows={3} />
         ) : (
-          sources.data?.map((source) => (
-            <article key={source.source_id}>
-              <h3>{source.title}</h3>
-              <p>
-                {source.source_class} · retrieved {when(source.retrieved_at)}
-              </p>
-              {source.origin_ref ? (
-                <p>
-                  <a href={source.origin_ref} target="_blank" rel="noreferrer">
-                    Open source
-                  </a>
-                </p>
-              ) : null}
-              <p>{source.limitations}</p>
-            </article>
-          ))
+          (() => {
+            const all = sources.data ?? [];
+            const shown = drawerSelection
+              ? all.filter((s) => drawerSelection.ids.includes(s.source_id))
+              : all;
+            return (
+              <>
+                {drawerSelection ? (
+                  <p>
+                    <button
+                      type="button"
+                      className="linklike"
+                      onClick={() => setDrawerSelection(null)}
+                    >
+                      Show all investigation sources
+                    </button>
+                  </p>
+                ) : null}
+                {shown.map((source) => (
+                  <article key={source.source_id}>
+                    <h3>{source.title}</h3>
+                    <p>
+                      {source.source_class} · retrieved {when(source.retrieved_at)} · captured by{' '}
+                      {source.captured_by}
+                    </p>
+                    {source.origin_ref ? (
+                      <p>
+                        <a href={source.origin_ref} target="_blank" rel="noreferrer">
+                          Open source
+                        </a>
+                      </p>
+                    ) : null}
+                    <p>{source.limitations}</p>
+                  </article>
+                ))}
+                {shown.length === 0 ? (
+                  <p>
+                    {drawerSelection
+                      ? 'This check has no independently retained source.'
+                      : 'No sources retained yet.'}
+                  </p>
+                ) : null}
+              </>
+            );
+          })()
         )}
-        {sources.data?.length === 0 ? <p>No sources retained yet.</p> : null}
       </EvidenceDrawer>
     </div>
   );

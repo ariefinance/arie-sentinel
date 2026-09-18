@@ -94,6 +94,9 @@ export function RelationshipMap({ graph }: { graph: RelationshipGraphOut }) {
                 {' — '}
                 <span className="cell-muted">
                   {humanizeState(edge.state)}: {edge.basis}
+                  {edge.source_ids.length > 0
+                    ? ` (${edge.source_ids.length} source${edge.source_ids.length === 1 ? '' : 's'})`
+                    : ' (intake claim — no independent source)'}
                 </span>
               </li>
             ))}

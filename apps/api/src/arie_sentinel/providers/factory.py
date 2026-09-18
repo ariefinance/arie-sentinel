@@ -16,6 +16,7 @@ from .base import (
     WebResearchProvider,
     WebResult,
 )
+from .companies_house import CompaniesHouseProvider, UnavailableCompaniesHouseProvider
 from .gdelt import GdeltNewsProvider
 from .gleif import GleifProvider
 from .opencorporates import OpenCorporatesProvider
@@ -35,6 +36,8 @@ class Providers:
     # Free, no-key supplementary sources (US-only corroboration; news discovery).
     sec: SecEdgarProvider | None = None
     news: GdeltNewsProvider | None = None
+    # UK Companies House (free key); Unavailable* when no key is configured.
+    companies_house: CompaniesHouseProvider | UnavailableCompaniesHouseProvider | None = None
 
 
 class UnavailableScreeningProvider:
@@ -93,4 +96,13 @@ def build_providers(settings: Settings) -> Providers:
         gleif=GleifProvider(settings.gleif_base_url, settings.provider_timeout_seconds),
         sec=SecEdgarProvider(settings.sec_edgar_base_url, settings.provider_timeout_seconds),
         news=GdeltNewsProvider(settings.gdelt_base_url, settings.provider_timeout_seconds),
+        companies_house=(
+            CompaniesHouseProvider(
+                settings.companies_house_api_key,
+                settings.companies_house_base_url,
+                settings.provider_timeout_seconds,
+            )
+            if settings.companies_house_api_key
+            else UnavailableCompaniesHouseProvider()
+        ),
     )

@@ -7,6 +7,8 @@ GDELT 2.0 Doc API: https://api.gdeltproject.org/api/v2/doc/doc?query=...&format=
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import httpx
 
 from .base import ProviderInvalidResponse, WebResult
@@ -43,6 +45,7 @@ class GdeltNewsProvider:
             return []
         if not isinstance(articles, list):
             raise ProviderInvalidResponse("gdelt: articles must be a list")
+        fetched_at = datetime.now(UTC).isoformat()
         results: list[WebResult] = []
         for article in articles:
             if not isinstance(article, dict):
@@ -57,10 +60,13 @@ class GdeltNewsProvider:
                     title=title,
                     url=url,
                     excerpt="",  # GDELT returns metadata only; snippet is not evidence
-                    retrieved_at=seen if isinstance(seen, str) else "",
+                    # Retrieval time is Sentinel's actual fetch time; the GDELT
+                    # seen/publication date is provenance metadata, not retrieval.
+                    retrieved_at=fetched_at,
                     publisher=article.get("domain")
                     if isinstance(article.get("domain"), str)
                     else None,
+                    published_at=seen if isinstance(seen, str) else None,
                 )
             )
         return results

@@ -18,6 +18,7 @@ from ..models.core import Identifier, Investigation
 from ..models.enums import RelationshipState, ScreeningState, SourceClass
 from ..models.evidence import Evidence, ScreeningResult, Source
 from ..providers.normalization import normalize_entity_name
+from .contradictions import REGULATOR_LICENCE_LICENSE_CLASS
 
 
 # Node types: Company | Person | Address | Domain | LEI | Regulator | SanctionsEntity
@@ -91,7 +92,9 @@ def build_graph(session: Session, investigation: Investigation) -> Graph:
             )
             break
 
-    # Officers (registry) -> DIRECTOR_OF / OFFICER_OF
+    # Officers (registry) -> DIRECTOR_OF / OFFICER_OF, with source provenance.
+    officer_names: set[str] = set()
+    officer_sources: dict[str, list[uuid.UUID]] = {}
     for evidence, source in rows:
         observed = evidence.observed_value or {}
         position = observed.get("position")
@@ -101,9 +104,8 @@ def build_graph(session: Session, investigation: Investigation) -> Graph:
             and position
             and isinstance(name, str)
         ):
-            node_id = add_node(
-                GraphNode(f"person:{normalize_entity_name(name)}", "Person", name, str(position))
-            )
+            norm = normalize_entity_name(name)
+            node_id = add_node(GraphNode(f"person:{norm}", "Person", name, str(position)))
             edge_type = "DIRECTOR_OF" if "director" in str(position).lower() else "OFFICER_OF"
             edges.append(
                 GraphEdge(
@@ -115,30 +117,35 @@ def build_graph(session: Session, investigation: Investigation) -> Graph:
                     [source.source_id],
                 )
             )
+            officer_names.add(norm)
+            officer_sources.setdefault(norm, []).append(source.source_id)
 
-    # Supplied contact -> relationship edge
+    # Supplied contact -> relationship edge, faithfully preserving the evidence state.
+    # Evidence-backed relations (VERIFIED/CORROBORATED) carry the officer source ids;
+    # a pure intake claim carries no external source and is clearly marked CLAIMED.
+    state_map = {
+        RelationshipState.VERIFIED: ("OFFICER_OF", "CONFIRMED"),
+        RelationshipState.CORROBORATED: ("ASSOCIATED_WITH", "CORROBORATED"),
+        RelationshipState.SELF_ASSERTED: ("CLAIMS_TO_REPRESENT", "CLAIMED"),
+        RelationshipState.UNVERIFIED: ("CLAIMS_TO_REPRESENT", "UNVERIFIED"),
+        RelationshipState.CONTRADICTED: ("CLAIMS_TO_REPRESENT", "CONTRADICTED"),
+    }
     for candidate in inv.candidates:
-        person_id = add_node(
-            GraphNode(
-                f"person:{normalize_entity_name(candidate.label_fragment)}",
-                "Person",
-                candidate.label_fragment,
-            )
-        )
-        if candidate.relationship_state is RelationshipState.VERIFIED:
-            edge_type, state = "OFFICER_OF", "CONFIRMED"
+        norm = normalize_entity_name(candidate.label_fragment)
+        # A verified contact already appears as an officer edge (with provenance).
+        if candidate.relationship_state is RelationshipState.VERIFIED and norm in officer_names:
+            continue
+        person_id = add_node(GraphNode(f"person:{norm}", "Person", candidate.label_fragment))
+        rel_state = candidate.relationship_state or RelationshipState.UNVERIFIED
+        edge_type, state = state_map.get(rel_state, ("CLAIMS_TO_REPRESENT", "UNVERIFIED"))
+        evidence_ids = officer_sources.get(norm, [])
+        if evidence_ids:
+            basis = candidate.match_basis or "Registry evidence links this person to the company."
         else:
-            edge_type, state = "CLAIMS_TO_REPRESENT", "UNVERIFIED"
-        edges.append(
-            GraphEdge(
-                person_id,
-                company_id,
-                edge_type,
-                candidate.match_basis or "Supplied contact; relationship not established.",
-                state,
-                [],
+            basis = candidate.match_basis or (
+                "Supplied contact (intake claim); no independent relationship evidence retained."
             )
-        )
+        edges.append(GraphEdge(person_id, company_id, edge_type, basis, state, list(evidence_ids)))
 
     # Domains -> USES_DOMAIN
     for evidence, source in rows:
@@ -166,22 +173,67 @@ def build_graph(session: Session, investigation: Investigation) -> Graph:
             )
         )
         if lei:
+            gleif_sources = [
+                s.source_id
+                for _, s in rows
+                if s.source_class is SourceClass.CORPORATE_REGISTRY
+                and s.title.startswith("GLEIF LEI record")
+            ]
             node_id = add_node(GraphNode(f"lei:{lei}", "LEI", lei))
             edges.append(
                 GraphEdge(
                     company_id,
                     node_id,
-                    "MATCHED_TO",
-                    "GLEIF legal-entity identifier.",
-                    "CONFIRMED",
-                    [],
+                    "HAS_LEI",
+                    "GLEIF legal-entity identifier for the resolved company.",
+                    "CONFIRMED" if gleif_sources else "REPORTED",
+                    gleif_sources,
                 )
             )
 
-    # Regulator / licence sources -> LICENSED_BY (reported/claimed)
+    # GLEIF direct parent/child -> PARENT_OF (with provenance).
+    for evidence, source in rows:
+        observed = evidence.observed_value or {}
+        if observed.get("kind") != "gleif_relationships":
+            continue
+        parent_lei = observed.get("parent_lei")
+        if isinstance(parent_lei, str) and parent_lei:
+            node_id = add_node(
+                GraphNode(f"lei:{parent_lei}", "Company", parent_lei, "GLEIF parent")
+            )
+            edges.append(
+                GraphEdge(
+                    node_id,
+                    company_id,
+                    "PARENT_OF",
+                    "GLEIF records this entity as the direct parent.",
+                    "CONFIRMED",
+                    [source.source_id],
+                )
+            )
+        children = observed.get("child_leis")
+        if isinstance(children, list):
+            for child in children:
+                if not isinstance(child, str) or not child:
+                    continue
+                node_id = add_node(GraphNode(f"lei:{child}", "Company", child, "GLEIF subsidiary"))
+                edges.append(
+                    GraphEdge(
+                        company_id,
+                        node_id,
+                        "PARENT_OF",
+                        "GLEIF records the company as the direct parent of this entity.",
+                        "CONFIRMED",
+                        [source.source_id],
+                    )
+                )
+
+    # Regulator / licence sources -> LICENSED_BY. Only a regulator's verification of
+    # this entity's licence qualifies; a corporate registry / generic government
+    # publication does NOT establish a licensing relationship.
     for source in {s for _, s in rows}:
         if (
-            source.license_class == "public-government-source"
+            source.license_class == REGULATOR_LICENCE_LICENSE_CLASS
             and source.source_class is not SourceClass.CORPORATE_REGISTRY
         ):
             node_id = add_node(
@@ -192,8 +244,8 @@ def build_graph(session: Session, investigation: Investigation) -> Graph:
                     company_id,
                     node_id,
                     "LICENSED_BY",
-                    source.limitations or "Regulatory source retained.",
-                    "REPORTED",
+                    source.limitations or "Regulator verification retained.",
+                    "CORROBORATED",
                     [source.source_id],
                 )
             )

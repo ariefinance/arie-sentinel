@@ -27,6 +27,7 @@ from ..models.enums import (
 )
 from ..models.evidence import Evidence, Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
+from .contradictions import REGULATOR_LICENCE_LICENSE_CLASS
 
 _CONTRADICTION_TYPES = {
     FindingType.CONTRADICTION,
@@ -94,6 +95,22 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
     def source_ids(predicate: Callable[[Source], bool]) -> list[uuid.UUID]:
         return [s.source_id for s in sources if predicate(s)]
 
+    # The resolved registry record backs identity/status/registration/incorporation/
+    # address; the GLEIF record backs the LEI row. Rows carry the real source ids so
+    # drill-down is row-specific; a claim with no independent source gets none.
+    registry_source_ids = source_ids(
+        lambda s: (
+            s.source_class is SourceClass.CORPORATE_REGISTRY
+            and s.title.startswith("Registry candidate")
+        )
+    )
+    gleif_source_ids = source_ids(
+        lambda s: (
+            s.source_class is SourceClass.CORPORATE_REGISTRY
+            and s.title.startswith("GLEIF LEI record")
+        )
+    )
+
     rows: list[BoardRow] = []
 
     # Legal identity
@@ -138,18 +155,19 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
             "Corporate status",
             EvidenceState.REPORTED.value if status else EvidenceState.NOT_ASSESSED.value,
             status or "Not established from cited source",
+            source_ids=registry_source_ids if status else [],
         )
     )
 
     # Registration
+    has_registration = bool(counterparty and counterparty.registry_id)
     rows.append(
         BoardRow(
             "registration",
             "Registration",
-            EvidenceState.CONFIRMED.value
-            if counterparty and counterparty.registry_id
-            else EvidenceState.UNVERIFIED.value,
+            EvidenceState.CONFIRMED.value if has_registration else EvidenceState.UNVERIFIED.value,
             counterparty.registry_id if counterparty and counterparty.registry_id else "Not found",
+            source_ids=registry_source_ids if has_registration else [],
         )
     )
 
@@ -161,6 +179,7 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
             "Incorporation",
             EvidenceState.REPORTED.value if inc else EvidenceState.NOT_ASSESSED.value,
             inc or "Not established",
+            source_ids=registry_source_ids if inc else [],
         )
     )
 
@@ -172,6 +191,7 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
             "Registered address",
             EvidenceState.REPORTED.value if address else EvidenceState.NOT_ASSESSED.value,
             address or "Not established",
+            source_ids=registry_source_ids if address else [],
         )
     )
 
@@ -206,6 +226,7 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
             "LEI",
             EvidenceState.CONFIRMED.value if lei else EvidenceState.UNVERIFIED.value,
             lei or "No LEI located",
+            source_ids=gleif_source_ids if lei else [],
         )
     )
 
@@ -260,14 +281,24 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
         )
     )
 
-    # Regulatory footprint
-    regulator_sources = source_ids(lambda s: s.license_class == "public-government-source")
+    # Regulatory footprint — only a regulator's verification of THIS entity's
+    # licence counts; a corporate registry / generic government source does not.
+    regulator_sources = source_ids(
+        lambda s: (
+            s.license_class == REGULATOR_LICENCE_LICENSE_CLASS
+            and s.source_class is not SourceClass.CORPORATE_REGISTRY
+        )
+    )
     rows.append(
         BoardRow(
             "regulatory_footprint",
             "Regulatory footprint",
-            EvidenceState.REPORTED.value if regulator_sources else EvidenceState.NOT_ASSESSED.value,
-            f"{len(regulator_sources)} record(s)" if regulator_sources else "None established",
+            EvidenceState.CORROBORATED.value
+            if regulator_sources
+            else EvidenceState.NOT_ASSESSED.value,
+            f"{len(regulator_sources)} regulator record(s)"
+            if regulator_sources
+            else "No regulator verification retained",
             source_ids=regulator_sources,
         )
     )

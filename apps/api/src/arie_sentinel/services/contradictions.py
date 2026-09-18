@@ -303,7 +303,11 @@ def evaluate(ctx: ContradictionContext) -> list[ContradictionResult]:
 
 # --- DB integration ------------------------------------------------------------------
 
-_AUTHORITATIVE_LICENCES = {"public-government-source"}
+# A licence/regulatory claim is only "independently established" by a source that is
+# specifically a regulator's verification of THAT licence — never a generic government
+# publication or a corporate registry record (which prove existence, not licensing).
+# A regulator adapter sets this marker; nothing else counts as regulator corroboration.
+REGULATOR_LICENCE_LICENSE_CLASS = "regulator-licence-verified"
 
 
 def build_context(
@@ -339,7 +343,10 @@ def build_context(
             if isinstance(name, str):
                 officer_names.append(name)
                 officer_ids.append(evidence.evidence_id)
-        if source.license_class in _AUTHORITATIVE_LICENCES:
+        if (
+            source.license_class == REGULATOR_LICENCE_LICENSE_CLASS
+            and source.source_class is not SourceClass.CORPORATE_REGISTRY
+        ):
             has_regulator = True
 
     registry_evidence_id: uuid.UUID | None = None

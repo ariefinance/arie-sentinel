@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # Free, no-key public sources (US SEC filers; public-news discovery).
     sec_edgar_base_url: str = "https://efts.sec.gov"
     gdelt_base_url: str = "https://api.gdeltproject.org"
+    # UK Companies House: free, but requires a free API key (register at
+    # developer.company-information.service.gov.uk). Absent key -> source unavailable.
+    companies_house_base_url: str = "https://api.company-information.service.gov.uk"
+    companies_house_api_key: str | None = None
     web_search_base_url: str | None = None
     web_search_api_key: str | None = None
     web_search_provider: str = "structured"

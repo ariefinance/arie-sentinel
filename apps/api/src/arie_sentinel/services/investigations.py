@@ -484,7 +484,9 @@ def run_enrichment(
                     extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
                 )
             )
+            _run_gleif_relationships(session, investigation, gleif, candidate.lei)
     _run_public_intelligence(session, investigation, active_providers)
+    _run_supplementary_sources(session, investigation, active_providers)
     run_contradiction_checks(session, investigation, candidate)
     investigation.investigation_state = InvestigationState.COMPLETED
     record_audit(
@@ -496,6 +498,184 @@ def run_enrichment(
         target_ref=str(candidate_id),
         payload={"status": "completed"},
     )
+
+
+def _run_gleif_relationships(
+    session: Session, investigation: Investigation, gleif: Any, lei: str
+) -> None:
+    """Persist GLEIF direct parent/child relationships (free) with provenance."""
+    lookup_rel = getattr(gleif, "lookup_relationships", None)
+    if lookup_rel is None:
+        return
+    try:
+        relationships = lookup_rel(lei)
+    except _SOURCE_FAILURE:
+        return
+    parent_lei = relationships.get("parent_lei") if isinstance(relationships, dict) else None
+    child_leis = relationships.get("child_leis") if isinstance(relationships, dict) else None
+    child_list = [str(c) for c in child_leis] if isinstance(child_leis, list) else []
+    if not parent_lei and not child_list:
+        return
+    source = Source(
+        investigation_id=investigation.investigation_id,
+        source_class=SourceClass.CORPORATE_REGISTRY,
+        title=f"GLEIF relationships: {lei}",
+        origin_ref=f"{gleif.base_url}/lei-records/{lei}/direct-parent",
+        retrieved_at=datetime.now(UTC),
+        captured_by="adapter:gleif",
+        limitations="GLEIF direct parent/child relationships for the supplied LEI.",
+        license_class="GLEIF-public",
+    )
+    session.add(source)
+    session.flush()
+    session.add(
+        Evidence(
+            source_id=source.source_id,
+            observed_value={
+                "kind": "gleif_relationships",
+                "parent_lei": parent_lei,
+                "child_leis": child_list,
+            },
+            extracted_by="adapter:gleif",
+            extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+        )
+    )
+
+
+def _run_supplementary_sources(
+    session: Session, inv: Investigation, providers: Providers | Any
+) -> None:
+    """Free, no-key supplementary sourcing: GDELT discovery, SEC (US), Companies House (GB).
+
+    All are optional and jurisdiction-gated; each fails closed to a source-unavailable
+    limitation and never asserts absence as adverse. Discovery leads are not evidence.
+    """
+    company = inv.counterparty.legal_name if inv.counterparty else inv.company_label
+    jurisdiction = ((inv.counterparty.jurisdiction if inv.counterparty else "") or "").upper()
+
+    news = getattr(providers, "news", None)
+    if news is not None:
+        try:
+            leads = news.search(company)
+        except _SOURCE_FAILURE as exc:
+            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+            record_audit(
+                session,
+                actor="adapter:gdelt",
+                action=AuditAction.STATE_CHANGE,
+                object_type="public_intelligence",
+                investigation_id=inv.investigation_id,
+                rationale=str(exc),
+                payload={"source": "gdelt", "status": "unavailable"},
+            )
+            leads = []
+        for lead in leads[:10]:
+            session.add(
+                Source(
+                    investigation_id=inv.investigation_id,
+                    source_class=SourceClass.WEB_PUBLIC,
+                    title=lead.title,
+                    origin_ref=lead.url,
+                    retrieved_at=_parse_time(lead.retrieved_at),
+                    captured_by="adapter:gdelt:discovery",
+                    limitations=(
+                        "Public-news discovery lead (GDELT); not evidence and not adverse "
+                        "by itself. Analyst review required."
+                    ),
+                    license_class="linked-public-source",
+                )
+            )
+
+    sec = getattr(providers, "sec", None)
+    if sec is not None and jurisdiction.startswith("US"):
+        try:
+            records = sec.search_company(company)
+        except _SOURCE_FAILURE as exc:
+            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+            record_audit(
+                session,
+                actor="adapter:sec_edgar",
+                action=AuditAction.STATE_CHANGE,
+                object_type="public_intelligence",
+                investigation_id=inv.investigation_id,
+                rationale=str(exc),
+                payload={"source": "sec_edgar", "status": "unavailable"},
+            )
+            records = []
+        if records:
+            record = records[0]
+            sec_source = Source(
+                investigation_id=inv.investigation_id,
+                source_class=SourceClass.CORPORATE_REGISTRY,
+                title=f"SEC EDGAR: {record.name}",
+                origin_ref="https://www.sec.gov/cgi-bin/browse-edgar",
+                retrieved_at=datetime.now(UTC),
+                captured_by="adapter:sec_edgar",
+                limitations=(
+                    "US SEC filer record. Absence of an EDGAR record is not adverse — most "
+                    "companies are not SEC filers."
+                ),
+                license_class="public-sec",
+            )
+            session.add(sec_source)
+            session.flush()
+            session.add(
+                Evidence(
+                    source_id=sec_source.source_id,
+                    observed_value={
+                        "name": record.name,
+                        "cik": record.cik,
+                        "tickers": list(record.tickers),
+                    },
+                    extracted_by="adapter:sec_edgar",
+                    extraction_confidence=ExtractionConfidence.REPORTED,
+                )
+            )
+
+    companies_house = getattr(providers, "companies_house", None)
+    registry_id = inv.counterparty.registry_id if inv.counterparty else None
+    if companies_house is not None and jurisdiction.startswith("GB") and registry_id:
+        try:
+            profile = companies_house.get_company(registry_id)
+        except _SOURCE_FAILURE as exc:
+            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+            record_audit(
+                session,
+                actor="adapter:companies_house",
+                action=AuditAction.STATE_CHANGE,
+                object_type="public_intelligence",
+                investigation_id=inv.investigation_id,
+                rationale=str(exc),
+                payload={"source": "companies_house", "status": "unavailable"},
+            )
+            profile = None
+        if profile is not None:
+            ch_source = Source(
+                investigation_id=inv.investigation_id,
+                source_class=SourceClass.CORPORATE_REGISTRY,
+                title=f"Companies House: {profile.name}",
+                origin_ref=f"https://find-and-update.company-information.service.gov.uk/company/{profile.company_number}",
+                retrieved_at=datetime.now(UTC),
+                captured_by="adapter:companies_house",
+                limitations="UK Companies House public record for the resolved company number.",
+                license_class="public-government-source",
+            )
+            session.add(ch_source)
+            session.flush()
+            session.add(
+                Evidence(
+                    source_id=ch_source.source_id,
+                    observed_value={
+                        "company_number": profile.company_number,
+                        "name": profile.name,
+                        "status": profile.status,
+                        "incorporation_date": profile.incorporation_date,
+                        "registered_address": profile.registered_address,
+                    },
+                    extracted_by="adapter:companies_house",
+                    extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+                )
+            )
 
 
 def _public_validation_uses_fixture_providers(investigation: Investigation) -> bool:
@@ -950,6 +1130,12 @@ def _claimed_company_domains(inv: Investigation) -> dict[str, str]:
     context = inv.case_context or {}
     for key in ("company_domain", "domain", "website"):
         add(context.get(key), f"supplied case context field '{key}'")
+    # Subject-supplied claims are the live intake path (Investigate UI stores the
+    # website under claims). Consume the same values so a real analyst-entered
+    # website drives RDAP/domain enrichment, not only the demo fixtures.
+    claims = inv.claims
+    for key in ("company_domain", "domain", "website"):
+        add(claims.get(key), f"supplied intake claim '{key}'")
     if inv.counterparty is not None:
         for identifier in inv.counterparty.identifiers:
             if identifier.id_type.lower() in {"domain", "website"}:

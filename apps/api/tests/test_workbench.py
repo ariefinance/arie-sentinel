@@ -357,3 +357,395 @@ def test_gdelt_success_empty_and_invalid() -> None:
     )
     with pytest.raises(ProviderInvalidResponse):
         provider.search("Example Company")
+
+
+# --- PR #8 review remediation ---------------------------------------------------------
+
+from types import SimpleNamespace as _NS  # noqa: E402
+
+from arie_sentinel.models.core import PersonCandidate  # noqa: E402
+from arie_sentinel.models.enums import (  # noqa: E402
+    ExtractionConfidence,
+    RelationshipState,
+    SourceClass,
+)
+from arie_sentinel.models.evidence import Evidence, Source  # noqa: E402
+from arie_sentinel.providers.base import ScreeningSubject  # noqa: E402
+from arie_sentinel.providers.companies_house import CompaniesHouseProvider  # noqa: E402
+from arie_sentinel.providers.gleif import GleifProvider  # noqa: E402
+from arie_sentinel.providers.sanctions import (  # noqa: E402
+    OfficialSanctionsProvider,
+    SanctionedEntity,
+)
+from arie_sentinel.services.contradictions import (  # noqa: E402
+    REGULATOR_LICENCE_LICENSE_CLASS,
+    build_context,
+)
+from arie_sentinel.services.investigations import (  # noqa: E402
+    _claimed_company_domains,
+    _run_public_intelligence,
+    _run_supplementary_sources,
+)
+
+
+class _FakeDomain:
+    def __init__(self) -> None:
+        self.lookups: list[str] = []
+
+    def lookup(self, domain: str):
+        self.lookups.append(domain)
+        from arie_sentinel.providers.base import DomainRecord
+
+        return DomainRecord(domain=domain, registered_on="2024-01-01")
+
+
+class _FakeWeb:
+    def search(self, query: str):
+        return []
+
+    def retrieve(self, url: str):
+        return None
+
+
+# BLOCKER 1 — a website supplied through the live intake claims path drives RDAP.
+
+
+def test_intake_claim_website_is_a_claimed_domain(db: Session) -> None:
+    inv = create_investigation(
+        db,
+        company_label="Vantar - Castellan",
+        contact_label="",
+        actor=ANALYST,
+        claims={"website": "https://acme-live.example.test"},
+    )
+    db.flush()
+    domains = _claimed_company_domains(inv)
+    assert "acme-live.example.test" in domains
+
+
+def test_intake_claim_website_triggers_domain_enrichment(db: Session) -> None:
+    inv = create_investigation(
+        db,
+        company_label="Vantar - Castellan",
+        contact_label="",
+        actor=ANALYST,
+        claims={"website": "https://acme-live.example.test"},
+    )
+    db.flush()
+    domain = _FakeDomain()
+    _run_public_intelligence(db, inv, _NS(web=_FakeWeb(), domain=domain))
+    assert domain.lookups == ["acme-live.example.test"]
+
+
+# MAJOR 6 — a corporate registry / generic government source must NOT satisfy a licence claim.
+
+
+def test_public_government_source_does_not_establish_licence(db: Session) -> None:
+    inv = create_investigation(
+        db, company_label="Vantar - Castellan", contact_label="", actor=ANALYST
+    )
+    db.flush()
+    src = Source(
+        investigation_id=inv.investigation_id,
+        source_class=SourceClass.CORPORATE_REGISTRY,
+        title="Registry candidate: Example",
+        retrieved_at=inv.created_at,
+        captured_by="fixture:public_registry_citation",
+        limitations="registry",
+        license_class="public-government-source",
+    )
+    db.add(src)
+    db.flush()
+    db.add(
+        Evidence(
+            source_id=src.source_id,
+            observed_value={"registry_id": "X1", "legal_name": "Example"},
+            extracted_by="x",
+            extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+        )
+    )
+    db.flush()
+    candidate = EntityCandidate(
+        investigation_id=inv.investigation_id,
+        legal_name="Example",
+        jurisdiction="GB",
+        registry_class="companies_house",
+        registry_id="X1",
+        legal_status="Active",
+        registered_address=None,
+        incorporation_date=None,
+        lei=None,
+        alternative_names=[],
+        provider="test",
+        retrieved_at=inv.created_at,
+    )
+    db.add(candidate)
+    db.flush()
+    inv.case_context = {"claims": {"licence": "FCA authorised"}}
+    ctx = build_context(db, inv, candidate)
+    assert ctx.has_authoritative_regulator_source is False
+    keys = {r.key for r in evaluate(ctx)}
+    assert "licence_not_independently_established" in keys
+
+
+def test_regulator_marker_source_does_establish_licence(db: Session) -> None:
+    inv = create_investigation(
+        db, company_label="Vantar - Castellan", contact_label="", actor=ANALYST
+    )
+    db.flush()
+    src = Source(
+        investigation_id=inv.investigation_id,
+        source_class=SourceClass.OFFICIAL_PUBLICATION,
+        title="Regulator register",
+        retrieved_at=inv.created_at,
+        captured_by="adapter:regulator",
+        limitations="regulator licence verification",
+        license_class=REGULATOR_LICENCE_LICENSE_CLASS,
+    )
+    db.add(src)
+    db.flush()
+    db.add(
+        Evidence(
+            source_id=src.source_id,
+            observed_value={"licence": "verified"},
+            extracted_by="x",
+            extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+        )
+    )
+    db.flush()
+    ctx = build_context(db, inv, None)
+    assert ctx.has_authoritative_regulator_source is True
+
+
+# MAJOR 4/5 — faithful relationship-state mapping + evidence-backed provenance.
+
+
+def _candidate(inv: Investigation, name: str, state: RelationshipState) -> PersonCandidate:
+    return PersonCandidate(
+        investigation_id=inv.investigation_id,
+        label_fragment=name,
+        relationship_state=state,
+        created_by="system",
+    )
+
+
+def test_graph_preserves_relationship_states(db: Session) -> None:
+    inv = create_investigation(
+        db, company_label="Vantar - Castellan", contact_label="", actor=ANALYST
+    )
+    db.flush()
+    db.add_all(
+        [
+            _candidate(inv, "Corr Person", RelationshipState.CORROBORATED),
+            _candidate(inv, "Self Person", RelationshipState.SELF_ASSERTED),
+            _candidate(inv, "Unv Person", RelationshipState.UNVERIFIED),
+            _candidate(inv, "Contra Person", RelationshipState.CONTRADICTED),
+        ]
+    )
+    db.flush()
+    db.refresh(inv)
+    graph = build_graph(db, inv)
+    by_state = {e.state for e in graph.edges}
+    assert {"CORROBORATED", "CLAIMED", "UNVERIFIED", "CONTRADICTED"}.issubset(by_state)
+    # None of these claim-only relationships were collapsed to a directorship.
+    assert all(e.type != "DIRECTOR_OF" for e in graph.edges)
+    # A claim-only relationship legitimately carries no external source id.
+    for edge in graph.edges:
+        if edge.state in {"CLAIMED", "UNVERIFIED", "CONTRADICTED"}:
+            assert edge.source_ids == []
+
+
+def test_verified_officer_edge_carries_provenance(db: Session) -> None:
+    inv = _process(db, "Pacific Energy Procurement Ltd", contact="Daniel Kim")
+    graph = build_graph(db, inv)
+    officer_edges = [e for e in graph.edges if e.type in {"OFFICER_OF", "DIRECTOR_OF"}]
+    assert officer_edges
+    assert all(e.source_ids for e in officer_edges)  # evidence-backed edges have provenance
+
+
+# ISSUE 8 — SEC/GDELT actually consumed by enrichment (with mocked providers).
+
+
+class _FakeGdelt:
+    def search(self, query: str):
+        from arie_sentinel.providers.base import WebResult
+
+        return [
+            WebResult(
+                title="Lead",
+                url="https://news.example/x",
+                excerpt="",
+                retrieved_at="2026-09-18T00:00:00Z",
+                publisher="news.example",
+                published_at="20260101T000000Z",
+            )
+        ]
+
+
+class _FakeSec:
+    def search_company(self, name: str):
+        from arie_sentinel.providers.sec_edgar import EdgarRecord
+
+        return [EdgarRecord(name="ACME CORP", cik="1", tickers=("ACME",))]
+
+
+def test_supplementary_sources_consume_gdelt_and_sec(db: Session) -> None:
+    inv = create_investigation(
+        db, company_label="Vantar - Castellan", contact_label="", actor=ANALYST
+    )
+    db.flush()
+    cp, _ = __import__(
+        "arie_sentinel.services.investigations", fromlist=["get_or_create_counterparty"]
+    ).get_or_create_counterparty(
+        db,
+        EntityCandidate(
+            investigation_id=inv.investigation_id,
+            legal_name="ACME",
+            jurisdiction="US-DE",
+            registry_class="us_state_registry",
+            registry_id="US-1",
+            legal_status="Active",
+            registered_address=None,
+            incorporation_date=None,
+            lei=None,
+            alternative_names=[],
+            provider="test",
+            retrieved_at=inv.created_at,
+        ),
+    )
+    inv.counterparty_id = cp.counterparty_id
+    inv.counterparty = cp
+    db.flush()
+    _run_supplementary_sources(db, inv, _NS(news=_FakeGdelt(), sec=_FakeSec()))
+    db.flush()
+    titles = [
+        s.title
+        for s in db.scalars(select(Source).where(Source.investigation_id == inv.investigation_id))
+    ]
+    assert any(t.startswith("SEC EDGAR:") for t in titles)
+    assert "Lead" in titles  # GDELT discovery lead retained
+
+
+# ISSUE 9 — Companies House adapter behaviour (mocked).
+
+
+def test_companies_house_success_and_failures() -> None:
+    provider = CompaniesHouseProvider("free-key", "https://ch.example.test")
+    provider.client = _client(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "items": [
+                    {"title": "ACME LTD", "company_number": "12345678", "company_status": "active"}
+                ]
+            },
+            request=request,
+        )
+    )
+    rows = provider.search_company("ACME")
+    assert rows and rows[0].registry_id == "12345678"
+
+    provider.client = _client(
+        lambda request: httpx.Response(200, json={"items": []}, request=request)
+    )
+    assert provider.search_company("Nobody") == []
+
+    provider.client = _client(lambda request: httpx.Response(401, request=request))
+    with pytest.raises(ProviderUnavailable):
+        provider.search_company("ACME")
+
+    provider.client = _client(lambda request: httpx.Response(429, request=request))
+    with pytest.raises(ProviderRateLimited):
+        provider.search_company("ACME")
+
+    def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("t", request=request)
+
+    provider.client = _client(timeout)
+    with pytest.raises(ProviderUnavailable):
+        provider.search_company("ACME")
+
+    provider.client = _client(
+        lambda request: httpx.Response(200, json={"items": "bad"}, request=request)
+    )
+    with pytest.raises(ProviderInvalidResponse):
+        provider.search_company("ACME")
+
+
+# ISSUE 10 — GLEIF parent/child relationships (mocked); 404 => empty.
+
+
+def test_gleif_relationships_parse_and_absence() -> None:
+    provider = GleifProvider("https://gleif.example.test")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/direct-parent"):
+            return httpx.Response(
+                200,
+                json={"data": {"attributes": {"lei": "PARENT000000000000LEI"}}},
+                request=request,
+            )
+        if request.url.path.endswith("/direct-children"):
+            return httpx.Response(
+                200,
+                json={"data": [{"attributes": {"lei": "CHILD0000000000000LEI"}}]},
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider.client = _client(handler)
+    rels = provider.lookup_relationships("SUBJECT00000000000LEI")
+    assert rels["parent_lei"] == "PARENT000000000000LEI"
+    assert rels["child_leis"] == ["CHILD0000000000000LEI"]
+
+    provider.client = _client(lambda request: httpx.Response(404, request=request))
+    empty = provider.lookup_relationships("X")
+    assert empty == {"parent_lei": None, "child_leis": []}
+
+
+# ISSUE 11 — official sanctions matcher: identifier-aware, DOB suppression, fail-closed.
+
+_OFAC = SanctionedEntity(
+    name="Victor Lane",
+    source_list="OFAC",
+    entity_type="person",
+    aliases=("V. Lane",),
+    birth_dates=("1970-01-01",),
+    countries=("RU",),
+    identifiers=("PASSPORT-999",),
+    profile_id="ofac-1",
+)
+
+
+def test_sanctions_name_match_is_potential_only() -> None:
+    provider = OfficialSanctionsProvider([_OFAC])
+    hits = provider.screen(ScreeningSubject(label="Victor Lane"))
+    assert len(hits) == 1
+    assert hits[0].state == "POTENTIAL_MATCH"
+
+
+def test_sanctions_identifier_match_is_strong_but_still_review() -> None:
+    provider = OfficialSanctionsProvider([_OFAC])
+    hits = provider.screen(
+        ScreeningSubject(label="Unrelated Name", identifiers={"passportNumber": ("PASSPORT-999",)})
+    )
+    assert len(hits) == 1
+    assert hits[0].state == "POTENTIAL_MATCH"
+    assert hits[0].score and hits[0].score >= 0.9
+
+
+def test_sanctions_dob_suppresses_false_positive() -> None:
+    provider = OfficialSanctionsProvider([_OFAC])
+    hits = provider.screen(ScreeningSubject(label="Victor Lane", birth_dates=("1990-05-05",)))
+    assert hits == []  # same name, different DOB -> not a match
+
+
+def test_sanctions_clean_checked_result_is_empty() -> None:
+    provider = OfficialSanctionsProvider([_OFAC])
+    assert provider.screen(ScreeningSubject(label="Totally Different Person")) == []
+
+
+def test_sanctions_unloaded_is_source_unavailable() -> None:
+    provider = OfficialSanctionsProvider()  # feeds not loaded
+    with pytest.raises(ProviderUnavailable):
+        provider.screen(ScreeningSubject(label="Anyone"))

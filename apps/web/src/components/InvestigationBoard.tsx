@@ -14,7 +14,7 @@ export function InvestigationBoard({
   onOpenSources,
 }: {
   rows: BoardRowOut[];
-  onOpenSources: () => void;
+  onOpenSources: (sourceIds: string[], label: string) => void;
 }) {
   return (
     <section className="panel" aria-label="Investigation board">
@@ -46,7 +46,7 @@ export function InvestigationBoard({
                         <button
                           type="button"
                           className="linklike"
-                          onClick={onOpenSources}
+                          onClick={() => onOpenSources(row.source_ids, row.label)}
                           aria-label={`View ${row.source_ids.length} source(s) for ${row.label}`}
                         >
                           ({row.source_ids.length} source
