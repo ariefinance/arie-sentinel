@@ -120,6 +120,31 @@ def build_graph(session: Session, investigation: Investigation) -> Graph:
             officer_names.add(norm)
             officer_sources.setdefault(norm, []).append(source.source_id)
 
+    # Persons with significant control (Companies House PSC) -> accurate relationship
+    # type PERSON_WITH_SIGNIFICANT_CONTROL_OF, with source provenance.
+    for evidence, source in rows:
+        observed = evidence.observed_value or {}
+        if observed.get("kind") != "psc":
+            continue
+        name = observed.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        natures = observed.get("natures_of_control")
+        nature_text = ", ".join(str(n) for n in natures) if isinstance(natures, list) else ""
+        norm = normalize_entity_name(name)
+        node_id = add_node(GraphNode(f"person:{norm}", "Person", name, "PSC"))
+        suffix = f" ({nature_text})." if nature_text else "."
+        edges.append(
+            GraphEdge(
+                node_id,
+                company_id,
+                "PERSON_WITH_SIGNIFICANT_CONTROL_OF",
+                f"Companies House records this person as having significant control{suffix}",
+                "CORROBORATED",
+                [source.source_id],
+            )
+        )
+
     # Supplied contact -> relationship edge, faithfully preserving the evidence state.
     # Evidence-backed relations (VERIFIED/CORROBORATED) carry the officer source ids;
     # a pure intake claim carries no external source and is clearly marked CLAIMED.

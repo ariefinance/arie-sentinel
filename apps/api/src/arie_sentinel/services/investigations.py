@@ -723,6 +723,121 @@ def _run_supplementary_sources(
                     extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
                 )
             )
+            _run_companies_house_officers(session, inv, companies_house, registry_id)
+            _run_companies_house_psc(session, inv, companies_house, registry_id)
+
+
+def _run_companies_house_officers(
+    session: Session, inv: Investigation, companies_house: Any, registry_id: str
+) -> None:
+    """Persist Companies House officers and corroborate the supplied contact (GB)."""
+    try:
+        officers = companies_house.get_officers(registry_id)
+    except _SOURCE_FAILURE as exc:
+        _note_supplementary_limitation(
+            session, inv, actor="adapter:companies_house", source="companies_house_officers",
+            reason=str(exc),
+        )
+        return
+    contact_norm = normalize_entity_name(inv.contact_label) if inv.contact_label.strip() else None
+    for officer in officers:
+        name = officer.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        position = officer.get("position")
+        source = Source(
+            investigation_id=inv.investigation_id,
+            source_class=SourceClass.CORPORATE_REGISTRY,
+            title=f"Companies House officer: {name}",
+            origin_ref=(
+                "https://find-and-update.company-information.service.gov.uk/company/"
+                f"{registry_id}/officers"
+            ),
+            retrieved_at=datetime.now(UTC),
+            captured_by="adapter:companies_house",
+            limitations=(
+                "UK Companies House officer appointment for the resolved company number."
+            ),
+            license_class="public-government-source",
+        )
+        session.add(source)
+        session.flush()
+        session.add(
+            Evidence(
+                source_id=source.source_id,
+                observed_value={
+                    "name": name,
+                    "position": position,
+                    "start_date": officer.get("start_date"),
+                    "end_date": officer.get("end_date"),
+                    "registry_id": registry_id,
+                },
+                extracted_by="adapter:companies_house",
+                extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+            )
+        )
+        # Corroborate the supplied contact when an officer's normalized name matches.
+        if contact_norm and normalize_entity_name(name) == contact_norm:
+            for person in inv.candidates:
+                if normalize_entity_name(person.label_fragment) == contact_norm:
+                    person.relationship_state = RelationshipState.VERIFIED
+                    person.person_evidence_status = PersonEvidenceStatus.LIMITED_EVIDENCE
+                    person.match_basis = (
+                        "Companies House lists an officer with this normalized name for the "
+                        "resolved company; it does not conclusively verify the person's identity."
+                    )
+
+
+def _run_companies_house_psc(
+    session: Session, inv: Investigation, companies_house: Any, registry_id: str
+) -> None:
+    """Persist Companies House persons with significant control (GB)."""
+    try:
+        pscs = companies_house.get_psc(registry_id)
+    except _SOURCE_FAILURE as exc:
+        _note_supplementary_limitation(
+            session, inv, actor="adapter:companies_house", source="companies_house_psc",
+            reason=str(exc),
+        )
+        return
+    for psc in pscs:
+        name = psc.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        natures = psc.get("natures_of_control")
+        source = Source(
+            investigation_id=inv.investigation_id,
+            source_class=SourceClass.CORPORATE_REGISTRY,
+            title=f"Companies House PSC: {name}",
+            origin_ref=(
+                "https://find-and-update.company-information.service.gov.uk/company/"
+                f"{registry_id}/persons-with-significant-control"
+            ),
+            retrieved_at=datetime.now(UTC),
+            captured_by="adapter:companies_house",
+            limitations=(
+                "UK Companies House person-with-significant-control record for the resolved "
+                "company number."
+            ),
+            license_class="public-government-source",
+        )
+        session.add(source)
+        session.flush()
+        session.add(
+            Evidence(
+                source_id=source.source_id,
+                observed_value={
+                    "kind": "psc",
+                    "name": name,
+                    "psc_kind": psc.get("kind"),
+                    "natures_of_control": natures if isinstance(natures, list) else [],
+                    "notified_on": psc.get("notified_on"),
+                    "registry_id": registry_id,
+                },
+                extracted_by="adapter:companies_house",
+                extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+            )
+        )
 
 
 def _public_validation_uses_fixture_providers(investigation: Investigation) -> bool:

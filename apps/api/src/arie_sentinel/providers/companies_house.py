@@ -139,6 +139,49 @@ class CompaniesHouseProvider:
                 )
         return officers
 
+    def get_psc(self, company_number: str) -> list[dict[str, str | None | list[str]]]:
+        """Return persons with significant control (free PSC endpoint).
+
+        The UK Companies House Public Data API exposes PSC data at
+        ``/company/{number}/persons-with-significant-control``. Each entry carries the
+        PSC name, kind, and natures of control.
+        """
+        payload = request_json(
+            self.client,
+            "GET",
+            f"{self.base_url}/company/{company_number}/persons-with-significant-control",
+            provider="companies_house",
+        )
+        items = payload.get("items")
+        if items is None:
+            return []
+        if not isinstance(items, list):
+            raise ProviderInvalidResponse("companies_house: psc items must be a list")
+        pscs: list[dict[str, str | None | list[str]]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if not isinstance(name, str):
+                continue
+            natures = item.get("natures_of_control")
+            pscs.append(
+                {
+                    "name": name,
+                    "kind": item.get("kind") if isinstance(item.get("kind"), str) else None,
+                    "natures_of_control": [str(n) for n in natures]
+                    if isinstance(natures, list)
+                    else [],
+                    "notified_on": item.get("notified_on")
+                    if isinstance(item.get("notified_on"), str)
+                    else None,
+                    "ceased_on": item.get("ceased_on")
+                    if isinstance(item.get("ceased_on"), str)
+                    else None,
+                }
+            )
+        return pscs
+
 
 class UnavailableCompaniesHouseProvider:
     """Used when no free API key is configured — fails closed, never 'no company'."""
@@ -150,4 +193,7 @@ class UnavailableCompaniesHouseProvider:
         raise ProviderUnavailable("companies_house: API key is not configured")
 
     def get_officers(self, company_number: str) -> list[dict[str, str | None]]:
+        raise ProviderUnavailable("companies_house: API key is not configured")
+
+    def get_psc(self, company_number: str) -> list[dict[str, str | None | list[str]]]:
         raise ProviderUnavailable("companies_house: API key is not configured")
