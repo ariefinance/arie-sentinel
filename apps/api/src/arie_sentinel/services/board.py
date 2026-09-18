@@ -370,19 +370,32 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
         )
     )
 
-    # Evidence coverage
+    # Evidence coverage — four distinct states. Zero collection errors is NOT the same
+    # as confirmed coverage; coverage is descriptive (what was retained), never itself an
+    # authoritative confirmation.
+    running = inv.investigation_state.value in {"NOT_STARTED", "RUNNING"}
     unavailable = inv.completeness_state is CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
-    rows.append(
-        BoardRow(
-            "evidence_coverage",
-            "Evidence coverage",
-            EvidenceState.SOURCE_UNAVAILABLE.value
-            if unavailable
-            else EvidenceState.CONFIRMED.value,
-            f"{len(sources)} source(s)"
-            + (" — a material source was unavailable" if unavailable else ""),
+    if running:
+        coverage_state, coverage_detail = (
+            EvidenceState.NOT_ASSESSED.value,
+            "Assessment in progress",
         )
-    )
+    elif unavailable:
+        coverage_state, coverage_detail = (
+            EvidenceState.SOURCE_UNAVAILABLE.value,
+            f"{len(sources)} source(s) — a material source was unavailable",
+        )
+    elif not sources:
+        coverage_state, coverage_detail = (
+            EvidenceState.UNVERIFIED.value,
+            "Completed with no evidence retained",
+        )
+    else:
+        coverage_state, coverage_detail = (
+            EvidenceState.REPORTED.value,
+            f"{len(sources)} source(s) collected",
+        )
+    rows.append(BoardRow("evidence_coverage", "Evidence coverage", coverage_state, coverage_detail))
 
     # Analyst actions
     open_findings = [f for f in findings if f.review_status is ReviewStatus.OPEN]

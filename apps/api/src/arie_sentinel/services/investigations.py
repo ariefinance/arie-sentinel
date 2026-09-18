@@ -477,16 +477,11 @@ def run_enrichment(
         try:
             gleif_data = gleif.lookup_lei(candidate.lei)
         except _SOURCE_FAILURE as exc:
+            # LEI enrichment is supplementary (a missing LEI is never adverse), so a
+            # GLEIF outage is a coverage limitation, not a material-source failure.
             gleif_data = None
-            investigation.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
-            record_audit(
-                session,
-                actor="adapter:gleif",
-                action=AuditAction.STATE_CHANGE,
-                object_type="enrichment",
-                investigation_id=investigation_id,
-                rationale=str(exc),
-                payload={"source": "gleif", "status": "unavailable"},
+            _note_supplementary_limitation(
+                session, investigation, actor="adapter:gleif", source="gleif", reason=str(exc)
             )
         if gleif_data is not None:
             existing_identifier = session.scalar(
@@ -582,6 +577,28 @@ def _run_gleif_relationships(
     )
 
 
+def _note_supplementary_limitation(
+    session: Session, inv: Investigation, *, actor: str, source: str, reason: str
+) -> None:
+    """Record a SUPPLEMENTARY-source outage without downgrading the whole case.
+
+    Supplementary sources (news discovery, US SEC corroboration, LEI enrichment) are
+    optional: their unavailability is a coverage limitation, never a material-source
+    failure. It must not overwrite a genuine MATERIAL_SOURCE_UNAVAILABLE already set.
+    """
+    if inv.completeness_state is not CompletenessState.MATERIAL_SOURCE_UNAVAILABLE:
+        inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+    record_audit(
+        session,
+        actor=actor,
+        action=AuditAction.STATE_CHANGE,
+        object_type="supplementary_source",
+        investigation_id=inv.investigation_id,
+        rationale=reason,
+        payload={"source": source, "status": "unavailable", "materiality": "supplementary"},
+    )
+
+
 def _run_supplementary_sources(
     session: Session, inv: Investigation, providers: Providers | Any
 ) -> None:
@@ -598,15 +615,10 @@ def _run_supplementary_sources(
         try:
             leads = news.search(company)
         except _SOURCE_FAILURE as exc:
-            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
-            record_audit(
-                session,
-                actor="adapter:gdelt",
-                action=AuditAction.STATE_CHANGE,
-                object_type="public_intelligence",
-                investigation_id=inv.investigation_id,
-                rationale=str(exc),
-                payload={"source": "gdelt", "status": "unavailable"},
+            # GDELT is discovery-only (supplementary): its outage is a coverage
+            # limitation, not a material-source failure for the whole case.
+            _note_supplementary_limitation(
+                session, inv, actor="adapter:gdelt", source="gdelt", reason=str(exc)
             )
             leads = []
         for lead in leads[:10]:
@@ -631,15 +643,10 @@ def _run_supplementary_sources(
         try:
             records = sec.search_company(company)
         except _SOURCE_FAILURE as exc:
-            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
-            record_audit(
-                session,
-                actor="adapter:sec_edgar",
-                action=AuditAction.STATE_CHANGE,
-                object_type="public_intelligence",
-                investigation_id=inv.investigation_id,
-                rationale=str(exc),
-                payload={"source": "sec_edgar", "status": "unavailable"},
+            # SEC EDGAR is US corroboration-only (supplementary); most companies are not
+            # SEC filers, so its outage is a coverage limitation, not a material failure.
+            _note_supplementary_limitation(
+                session, inv, actor="adapter:sec_edgar", source="sec_edgar", reason=str(exc)
             )
             records = []
         if records:
