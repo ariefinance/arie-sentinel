@@ -45,6 +45,26 @@ class Settings(BaseSettings):
     # developer.company-information.service.gov.uk). Absent key -> source unavailable.
     companies_house_base_url: str = "https://api.company-information.service.gov.uk"
     companies_house_api_key: str | None = None
+
+    # Official government sanctions feeds (all free, no key). Ingested into a local
+    # PostgreSQL cache; screening reads the cache, never a paid aggregator.
+    #  - OFAC SDN (US Treasury Sanctions List Service), XML.
+    #  - UN Consolidated List, XML.
+    #  - UK Sanctions List (GOV.UK; the retired OFSI consolidated list is not used), XML.
+    #  - EU Financial Sanctions Files (FSF), XML.
+    sanctions_ofac_url: str = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML"
+    sanctions_un_url: str = "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
+    sanctions_uk_url: str = (
+        "https://assets.publishing.service.gov.uk/media/uk_sanctions_list.xml"
+    )
+    sanctions_eu_url: str | None = None
+    # Feeds that MUST be present and fresh before screening may report NO_MATERIAL_MATCH.
+    sanctions_required_feeds: str = "OFAC,UN,UK"
+    # A cached feed older than this is treated as stale (coverage limitation, not clear).
+    sanctions_cache_max_age_hours: int = 168
+    # Hard cap on a single feed download to bound memory / DoS from a hostile response.
+    sanctions_feed_max_bytes: int = 64 * 1024 * 1024
+
     web_search_base_url: str | None = None
     web_search_api_key: str | None = None
     web_search_provider: str = "structured"

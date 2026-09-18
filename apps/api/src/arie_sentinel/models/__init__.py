@@ -23,6 +23,7 @@ from .evidence import (
     Source,
 )
 from .ops import AuditEvent, Job
+from .sanctions import SanctionsFeedState, SanctionsRecord
 
 __all__ = [
     "Base",
@@ -43,4 +44,6 @@ __all__ = [
     "AnalystDecision",
     "AuditEvent",
     "Job",
+    "SanctionsFeedState",
+    "SanctionsRecord",
 ]

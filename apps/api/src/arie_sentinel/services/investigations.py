@@ -50,7 +50,9 @@ from ..providers.base import (
 )
 from ..providers.factory import Providers, build_providers
 from ..providers.normalization import normalize_entity_name
+from ..providers.sanctions import OfficialSanctionsProvider
 from .contradictions import run_contradiction_checks
+from .sanctions_cache import CoverageReport, load_sanctions_matcher
 
 # A material source that could not be reached OR returned malformed data is
 # handled the same way: an explicit source-unavailable/limited state, never a
@@ -886,6 +888,12 @@ def _run_screening(
     entity: EntityCandidate | None = None,
 ) -> None:
     """Record screening hits for the counterparty + contact candidates (adjudicated later)."""
+    # Official sanctions feeds only: load the matcher from the local cache and capture
+    # coverage. "No material match" is only assertable when every required feed is fresh.
+    coverage: CoverageReport | None = None
+    screener = getattr(providers, "screening", None)
+    if isinstance(screener, OfficialSanctionsProvider):
+        screener, coverage = load_sanctions_matcher(session, get_settings())
     subjects = [_company_screening_subject(inv, entity)]
     subjects += [ScreeningSubject(label=c.label_fragment) for c in inv.candidates]
     highest = ScreeningState.NO_MATERIAL_MATCH
@@ -895,8 +903,10 @@ def _run_screening(
         ScreeningState.MATCH_REQUIRES_REVIEW: 2,
         ScreeningState.CONFIRMED_MATCH: 3,
     }
+    if screener is None:
+        screener = providers.screening
     try:
-        result_sets = [(subject, providers.screening.screen(subject)) for subject in subjects]
+        result_sets = [(subject, screener.screen(subject)) for subject in subjects]
     except _SOURCE_FAILURE as exc:
         inv.screening_state = None
         inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
@@ -916,9 +926,12 @@ def _run_screening(
             title=f"Screening search: {subject.label}",
             origin_ref=None,
             retrieved_at=datetime.now(UTC),
-            captured_by="adapter:screening",
-            limitations="Matches require human disposition; normalized response retained only.",
-            license_class="OpenSanctions-commercial-license-required",
+            captured_by="adapter:official_sanctions",
+            limitations=(
+                "Screened against the cached official government sanctions feeds "
+                "(OFAC/UN/UK/EU). Matches require human disposition; never auto-confirmed."
+            ),
+            license_class="official-government-sanctions-feed",
         )
         session.add(source)
         session.flush()
@@ -960,7 +973,33 @@ def _run_screening(
             )
             if order[state] > order[highest]:
                 highest = state
-    inv.screening_state = highest
+    # Coverage gate: "no material match" is only assertable when every required official
+    # feed is fresh in the cache. With incomplete coverage and no positive hit we must NOT
+    # claim a clear screen — record a limitation instead. Real hits still surface.
+    if (
+        coverage is not None
+        and not coverage.is_complete
+        and highest is ScreeningState.NO_MATERIAL_MATCH
+    ):
+        inv.screening_state = None
+        if inv.completeness_state is None:
+            inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        record_audit(
+            session,
+            actor="adapter:official_sanctions",
+            action=AuditAction.STATE_CHANGE,
+            object_type="screening",
+            investigation_id=inv.investigation_id,
+            target_ref="sanctions-coverage-incomplete",
+            rationale=coverage.limitation_text(),
+            payload={
+                "required": list(coverage.required),
+                "fresh": list(coverage.fresh),
+                "stale_or_missing": list(coverage.stale_or_missing),
+            },
+        )
+    else:
+        inv.screening_state = highest
     # Contact candidates: mark limited evidence (fixture) — never invents a person.
     for cand in inv.candidates:
         if cand.person_evidence_status is None:
