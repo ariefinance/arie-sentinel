@@ -177,6 +177,20 @@ def build_report_html(session: Session, investigation: Investigation) -> str:
     )
     graph = build_graph(session, investigation)
     related_entities = [n for n in graph.nodes if n.id != "company:subject"]
+    node_labels = {n.id: n.label for n in graph.nodes}
+    # Relationship provenance: FROM / RELATIONSHIP / TO / STATE / BASIS. A claim-only
+    # edge carries no source ids; the basis states that explicitly.
+    relationships = [
+        {
+            "from": node_labels.get(edge.source, edge.source),
+            "type": edge.type,
+            "to": node_labels.get(edge.target, edge.target),
+            "state": edge.state,
+            "basis": edge.basis,
+            "has_sources": bool(edge.source_ids),
+        }
+        for edge in graph.edges
+    ]
     return env.get_template("report.html").render(
         investigation=investigation,
         sources=sources,
@@ -190,6 +204,7 @@ def build_report_html(session: Session, investigation: Investigation) -> str:
         headline=report_headline(session, investigation),
         investigation_context=investigation.investigation_context,
         related_entities=related_entities,
+        relationships=relationships,
     )
 
 

@@ -265,18 +265,34 @@ def build_board(session: Session, investigation: Investigation) -> list[BoardRow
             )
         )
 
-    # Domain / website
+    # Domain / website — a claimed website is NOT the same as an established domain
+    # registration, and a claim alone is never upgraded to CORROBORATED. Only independent
+    # RDAP registration evidence corroborates; a claim with no such evidence stays CLAIMED
+    # and carries no source drill-down.
     domain_sources = source_ids(lambda s: s.source_class is SourceClass.DOMAIN_REGISTRATION)
     web_sources = source_ids(lambda s: s.source_class is SourceClass.WEB_PUBLIC)
-    has_domain = bool(domain_sources) or bool((inv.case_context or {}).get("website"))
+    ctx = inv.case_context or {}
+    claimed_website: str | None = None
+    for key in ("website", "domain", "company_domain"):
+        value = ctx.get(key) or inv.claims.get(key)
+        if isinstance(value, str) and value.strip():
+            claimed_website = value.strip()
+            break
+    if domain_sources:
+        domain_state = EvidenceState.CORROBORATED.value
+        domain_detail = "Domain registration corroborated (RDAP)"
+    elif claimed_website:
+        domain_state = EvidenceState.CLAIMED.value
+        domain_detail = f"Website claimed ({claimed_website}); domain registration not established"
+    else:
+        domain_state = EvidenceState.NOT_ASSESSED.value
+        domain_detail = "Not established"
     rows.append(
         BoardRow(
             "domain_website",
             "Domain / website",
-            EvidenceState.CORROBORATED.value
-            if domain_sources
-            else (EvidenceState.REPORTED.value if has_domain else EvidenceState.NOT_ASSESSED.value),
-            "Established" if has_domain else "Not established",
+            domain_state,
+            domain_detail,
             source_ids=domain_sources,
         )
     )

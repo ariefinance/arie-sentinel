@@ -123,6 +123,60 @@ test('the relationship map lists provenance-bearing relationships', async () => 
   expect(screen.getByLabelText('Person: Robert Vance')).toBeInTheDocument();
 });
 
+test('a relationship-map edge opens its own sources (map drill-down)', async () => {
+  const graphWithSource = {
+    investigation_id: 'case-1',
+    nodes: graph.nodes,
+    edges: [
+      {
+        source: 'person:robert',
+        target: 'company:subject',
+        type: 'OFFICER_OF',
+        basis: 'Registry lists Robert Vance as director.',
+        state: 'CORROBORATED',
+        source_ids: ['s1'],
+      },
+    ],
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/board')) return new Response(JSON.stringify(board));
+    if (url.endsWith('/graph')) return new Response(JSON.stringify(graphWithSource));
+    if (url.endsWith('/screening') || url.endsWith('/findings')) return new Response('[]');
+    if (url.endsWith('/sources'))
+      return new Response(
+        JSON.stringify([
+          {
+            source_id: 's1',
+            source_class: 'corporate_registry',
+            title: 'Companies House officer: Robert Vance',
+            origin_ref: null,
+            retrieved_at: '2026-01-01T00:00:00Z',
+            captured_by: 'adapter:companies_house',
+            limitations: 'officer',
+            license_class: 'public-government-source',
+          },
+        ]),
+      );
+    return new Response(JSON.stringify(investigation));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/investigations/case-1']}>
+        <Routes>
+          <Route path="/investigations/:id" element={<Investigation />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await screen.findByRole('heading', { name: 'Investigation board' });
+  await userEvent.click(screen.getByRole('button', { name: 'MAP' }));
+  await screen.findByRole('heading', { name: 'Relationship map' });
+  await userEvent.click(screen.getByRole('button', { name: /source.* for Robert Vance to/i }));
+  expect(await screen.findByText('Companies House officer: Robert Vance')).toBeInTheDocument();
+});
+
 test('board and map show an explicit unavailable state on API error, not empty results', async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);

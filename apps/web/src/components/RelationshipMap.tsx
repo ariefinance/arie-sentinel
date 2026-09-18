@@ -8,7 +8,13 @@ import { humanizeState } from '../lib/status';
  * A textual relationship list accompanies the diagram so meaning never depends on
  * colour or shape alone (WCAG). Selecting a node or edge shows its provenance.
  */
-export function RelationshipMap({ graph }: { graph: RelationshipGraphOut }) {
+export function RelationshipMap({
+  graph,
+  onOpenSources,
+}: {
+  graph: RelationshipGraphOut;
+  onOpenSources?: (ids: string[], label: string) => void;
+}) {
   const { nodes, edges } = graph;
   const [selected, setSelected] = useState<{ kind: 'node' | 'edge'; index: number } | null>(null);
 
@@ -86,20 +92,34 @@ export function RelationshipMap({ graph }: { graph: RelationshipGraphOut }) {
           )}
 
           <ul className="relmap__list" aria-label="Relationships">
-            {edges.map((edge, index) => (
-              <li key={`l-${index}`}>
-                <strong>{byId.get(edge.source)?.label ?? edge.source}</strong>{' '}
-                <span className="relmap__reltype">{humanizeState(edge.type)}</span>{' '}
-                <strong>{byId.get(edge.target)?.label ?? edge.target}</strong>
-                {' — '}
-                <span className="cell-muted">
-                  {humanizeState(edge.state)}: {edge.basis}
-                  {edge.source_ids.length > 0
-                    ? ` (${edge.source_ids.length} source${edge.source_ids.length === 1 ? '' : 's'})`
-                    : ' (intake claim — no independent source)'}
-                </span>
-              </li>
-            ))}
+            {edges.map((edge, index) => {
+              const fromLabel = byId.get(edge.source)?.label ?? edge.source;
+              const toLabel = byId.get(edge.target)?.label ?? edge.target;
+              const hasSources = edge.source_ids.length > 0;
+              return (
+                <li key={`l-${index}`}>
+                  <strong>{fromLabel}</strong>{' '}
+                  <span className="relmap__reltype">{humanizeState(edge.type)}</span>{' '}
+                  <strong>{toLabel}</strong>
+                  {' — '}
+                  <span className="cell-muted">
+                    {humanizeState(edge.state)}: {edge.basis}
+                  </span>{' '}
+                  {hasSources && onOpenSources ? (
+                    <button
+                      type="button"
+                      className="linklike"
+                      aria-label={`View ${edge.source_ids.length} source(s) for ${fromLabel} to ${toLabel}`}
+                      onClick={() => onOpenSources(edge.source_ids, `${fromLabel} → ${toLabel}`)}
+                    >
+                      {`(${edge.source_ids.length} source${edge.source_ids.length === 1 ? '' : 's'})`}
+                    </button>
+                  ) : (
+                    <span className="cell-muted">(intake claim — no independent source)</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

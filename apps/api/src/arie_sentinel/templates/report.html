@@ -70,11 +70,11 @@
   <h2>6. Findings / contradictions / follow-up</h2>
   {% for item in findings %}<p><strong>{{ item.title }}</strong> [{{ item.review_status.value }}]<br>{{ item.assessment_text }}<br><em>Action:</em> {{ item.action_text }}</p>{% else %}<p>No system findings were recorded. This does not mean that every fact was established.</p>{% endfor %}
 
-  <h2>6b. Related entities</h2>
-  {% if related_entities %}<table><tr><th>Entity</th><th>Type</th></tr>
-  {% for node in related_entities %}<tr><td>{{ node.label }}{% if node.detail %}<br><span class="meta">{{ node.detail }}</span>{% endif %}</td><td>{{ node.type }}</td></tr>{% endfor %}</table>
-  <p class="meta">Related entities are derived from the provenance-bearing records above; each relationship's basis is retained in the investigation graph.</p>
-  {% else %}<p>No related entities were established from the retained evidence.</p>{% endif %}
+  <h2>6b. Relationships (provenance)</h2>
+  {% if relationships %}<table><tr><th>From</th><th>Relationship</th><th>To</th><th>State</th><th>Basis</th></tr>
+  {% for rel in relationships %}<tr><td>{{ rel.from }}</td><td>{{ rel.type }}</td><td>{{ rel.to }}</td><td>{{ rel.state }}</td><td>{{ rel.basis }}{% if not rel.has_sources %}<br><span class="meta">Claim only — no independent source retained.</span>{% endif %}</td></tr>{% endfor %}</table>
+  <p class="meta">Each relationship is derived from the retained records; its state and basis are shown so no edge implies more than the evidence supports. A claim-only edge carries no independent source.</p>
+  {% else %}<p>No relationships were established from the retained evidence.</p>{% endif %}
 
   <h2>7. Could not establish / limitations</h2>
   <p>Completeness: {{ investigation.completeness_state.value if investigation.completeness_state else "Not assessed" }}. Missing or unavailable sources remain explicit; absence of a match is not proof of absence.</p>

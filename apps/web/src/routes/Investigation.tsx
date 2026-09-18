@@ -263,7 +263,10 @@ export function Investigation() {
           ) : graph.isPending ? (
             <LoadingState label="Building the relationship map…" rows={4} />
           ) : (
-            <RelationshipMap graph={graph.data ?? { investigation_id: id, nodes: [], edges: [] }} />
+            <RelationshipMap
+              graph={graph.data ?? { investigation_id: id, nodes: [], edges: [] }}
+              onOpenSources={openSources}
+            />
           )
         ) : null}
 
