@@ -82,3 +82,29 @@ export function humanizeState(value: string): string {
  */
 export const IDENTITY_NOT_RESOLVED_DISPLAY = 'Not yet resolved';
 export const SCREENING_NOT_RUN_DISPLAY = 'Not run';
+
+/**
+ * Tone for a board/graph state token, covering both the EvidenceState vocabulary
+ * and screening tokens. Colour is only reinforcement — the token text is always
+ * shown and `action_required` is surfaced independently of colour.
+ */
+export function boardTone(state: string): PillTone {
+  switch (state) {
+    case 'CONFIRMED':
+    case 'CORROBORATED':
+    case 'NO_MATERIAL_MATCH':
+      return 'positive';
+    case 'CONTRADICTED':
+    case 'POTENTIAL_MATCH':
+    case 'MATCH_REQUIRES_REVIEW':
+    case 'CONFIRMED_MATCH':
+      return 'attention';
+    case 'REPORTED':
+    case 'CLAIMED':
+      return 'info';
+    case 'SOURCE_UNAVAILABLE':
+      return 'caution';
+    default:
+      return 'neutral';
+  }
+}

@@ -21,9 +21,24 @@
   {% endif %}
   <div class="meta">Investigation {{ investigation.investigation_id }} · Case type: {{ case_type_label }} · generated from stored, reviewable records</div>
 
+  {% if headline %}
+  <table style="margin-top:10px">
+    <tr><th>Identity</th><th>Corroboration</th><th>Material contradictions</th><th>Evidence limitations</th><th>Analyst actions</th></tr>
+    <tr>
+      <td class="state">{{ headline.identity }}</td>
+      <td class="state">{{ headline.corroboration }}</td>
+      <td>{{ headline.contradictions }}</td>
+      <td>{{ headline.evidence_limitations }}</td>
+      <td>{{ headline.analyst_actions }}</td>
+    </tr>
+  </table>
+  <p class="meta">Corroboration is a transparent summary (Strong = identity confirmed, 3+ corroborating checks, no open contradictions; Partial = identity confirmed, no open contradictions; Limited = otherwise). It is not a risk score, and Sentinel makes no accept/reject decision.</p>
+  {% endif %}
+
   <h2>1. Subject / resolved entity</h2>
   <p><strong>Submitted company:</strong> {{ investigation.company_label }}<br>
   <strong>Case type:</strong> {{ case_type_label }}<br>
+  {% if investigation_context %}<strong>Investigation context:</strong> {{ investigation_context }}<br>{% endif %}
   <strong>Resolved entity:</strong> {{ investigation.counterparty.legal_name if investigation.counterparty else "Not established" }}<br>
   <strong>Identity state:</strong> <span class="state">{{ investigation.company_identity_status.value if investigation.company_identity_status else "NOT_VERIFIED" }}</span><br>
   <strong>Provider match basis:</strong> {{ investigation.company_match_basis or "No authoritative resolution recorded" }}</p>
@@ -54,6 +69,12 @@
 
   <h2>6. Findings / contradictions / follow-up</h2>
   {% for item in findings %}<p><strong>{{ item.title }}</strong> [{{ item.review_status.value }}]<br>{{ item.assessment_text }}<br><em>Action:</em> {{ item.action_text }}</p>{% else %}<p>No system findings were recorded. This does not mean that every fact was established.</p>{% endfor %}
+
+  <h2>6b. Related entities</h2>
+  {% if related_entities %}<table><tr><th>Entity</th><th>Type</th></tr>
+  {% for node in related_entities %}<tr><td>{{ node.label }}{% if node.detail %}<br><span class="meta">{{ node.detail }}</span>{% endif %}</td><td>{{ node.type }}</td></tr>{% endfor %}</table>
+  <p class="meta">Related entities are derived from the provenance-bearing records above; each relationship's basis is retained in the investigation graph.</p>
+  {% else %}<p>No related entities were established from the retained evidence.</p>{% endif %}
 
   <h2>7. Could not establish / limitations</h2>
   <p>Completeness: {{ investigation.completeness_state.value if investigation.completeness_state else "Not assessed" }}. Missing or unavailable sources remain explicit; absence of a match is not proof of absence.</p>

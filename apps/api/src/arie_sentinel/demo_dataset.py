@@ -134,6 +134,17 @@ _MERIDIAN = CandidateEntity(
     match_basis="exact legal name + jurisdiction + registry identifier",
 )
 
+_ZENITH = CandidateEntity(
+    legal_name="Zenith Global Traders Ltd",
+    jurisdiction="GB",
+    registry_class="companies_house",
+    registry_id="14750888",
+    status="Active",
+    incorporation_date="2023-05-09",
+    registered_address="3 Example Court, Manchester, GB",
+    match_basis="exact legal name + jurisdiction + registry identifier",
+)
+
 # --- Public validation record --------------------------------------------------------
 
 _ARIE_FINANCE = CandidateEntity(
@@ -177,6 +188,11 @@ DEMO_CASES: dict[str, DemoCase] = {
     "atlas global fuels": DemoCase(FICTIONAL_TEST_CASE, (_ATLAS,)),
     "northstar petroleum trading": DemoCase(FICTIONAL_TEST_CASE, (_NORTHSTAR,)),
     "meridian energy supplies ltd": DemoCase(FICTIONAL_TEST_CASE, (_MERIDIAN,)),
+    "zenith global traders ltd": DemoCase(
+        FICTIONAL_TEST_CASE,
+        (_ZENITH,),
+        {"website": "https://zenith-global.example.test"},
+    ),
     "arie finance": DemoCase(
         PUBLIC_VALIDATION_CASE, (_ARIE_FINANCE,), {"website": "https://www.ariefinance.com"}
     ),
@@ -204,6 +220,7 @@ SEED_CASE_LABELS: tuple[str, ...] = (
     "Atlas Global Fuels",
     "Northstar Petroleum Trading",
     "Meridian Energy Supplies Ltd",
+    "Zenith Global Traders Ltd",
     "ARIE Finance",
 )
 
@@ -217,6 +234,20 @@ SEED_CONTACTS: dict[str, str] = {
     "Atlas Global Fuels": "Michael Grant",
     "Northstar Petroleum Trading": "Victor Lane",
     "Meridian Energy Supplies Ltd": "Amira Hassan",
+    "Zenith Global Traders Ltd": "Robert Vance",
+}
+
+# Optional subject claims per seed case, tested against discovered evidence by the
+# contradiction engine. Non-evidentiary intake inputs, kept as separate metadata.
+SEED_CLAIMS: dict[str, dict[str, object]] = {
+    "Zenith Global Traders Ltd": {
+        "operating_since_year": 2008,
+        "registration_number": "GB-OLD-0001",
+        "jurisdiction": "GB",
+        "website": "https://zenith-global.example.test",
+        "contact_email": "robert@zenith-holdings-different.example",
+        "licence": "FCA authorised",
+    },
 }
 
 

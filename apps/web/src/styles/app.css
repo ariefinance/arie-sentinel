@@ -1005,3 +1005,59 @@
     flex-direction: column;
   }
 }
+
+/* --- Counterparty Intelligence Workbench --- */
+.linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.linklike:hover { color: var(--accent-hover); }
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-label);
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  white-space: nowrap;
+}
+.badge--action {
+  color: var(--attention);
+  border-color: var(--attention);
+  background: var(--attention-bg);
+  font-weight: 600;
+}
+
+.relmap {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  margin: 8px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.relmap__edge { stroke: var(--border-strong); stroke-width: 1.25; cursor: pointer; }
+.relmap__node rect {
+  fill: var(--surface-raised);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  cursor: pointer;
+}
+.relmap__node:focus { outline: none; }
+.relmap__node:focus rect { stroke: var(--accent); stroke-width: 2; }
+.relmap__type { font-size: 8px; fill: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.relmap__label { font-size: 10px; fill: var(--text-primary); font-weight: 600; }
+.relmap__list { margin: 8px 0 0; padding-left: 18px; }
+.relmap__list li { margin: 3px 0; }
+.relmap__reltype { font-variant: small-caps; color: var(--text-secondary); }
+
+.claims { margin: 4px 0 8px; }
+.claims > summary { cursor: pointer; color: var(--text-secondary); font-size: var(--text-label); }

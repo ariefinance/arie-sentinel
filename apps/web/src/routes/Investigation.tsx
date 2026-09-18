@@ -2,11 +2,15 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '../components/primitives/Button';
 import { EvidenceDrawer } from '../components/primitives/EvidenceDrawer';
+import { InvestigationBoard } from '../components/InvestigationBoard';
+import { RelationshipMap } from '../components/RelationshipMap';
 import { ErrorState, LoadingState } from '../components/primitives/StateBlocks';
 import { StatusPill } from '../components/primitives/StatusPill';
 import { api } from '../lib/api';
 import {
+  useBoard,
   useFindings,
+  useGraph,
   useInvestigation,
   useResolveEntity,
   useReviewFinding,
@@ -16,7 +20,7 @@ import {
 } from '../lib/queries';
 import { humanizeState, identityTone, investigationTone, screeningTone } from '../lib/status';
 
-const TABS = ['SUMMARY', 'FINDINGS', 'COMPANY', 'PERSON', 'SCREENING'] as const;
+const TABS = ['BOARD', 'MAP', 'FINDINGS', 'COMPANY', 'PERSON', 'SCREENING'] as const;
 type Tab = (typeof TABS)[number];
 const when = (value: string) => new Date(value).toLocaleString();
 // Minimum analyst-authored rationale length; mirrors the server-side minimum so
@@ -44,7 +48,9 @@ export function Investigation() {
   const resolve = useResolveEntity(id);
   const reviewScreening = useReviewScreening(id);
   const reviewFinding = useReviewFinding(id);
-  const [tab, setTab] = useState<Tab>('SUMMARY');
+  const [tab, setTab] = useState<Tab>('BOARD');
+  const board = useBoard(id, tab === 'BOARD');
+  const graph = useGraph(id, tab === 'MAP');
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Resolution rationale starts EMPTY and must be analyst-authored (B2).
   const [rationale, setRationale] = useState('');
@@ -119,11 +125,17 @@ export function Investigation() {
           {caseTypeLabel(data.case_type) ? (
             <Fact label="Case type" value={caseTypeLabel(data.case_type) ?? ''} />
           ) : null}
+          {data.investigation_context ? (
+            <Fact label="Context" value={data.investigation_context} />
+          ) : null}
           <Fact
             label="Resolved entity"
             value={data.counterparty?.legal_name ?? 'Not yet resolved'}
           />
           <Fact label="Contact" value={data.contact_label.trim() || 'No contact supplied'} />
+          <Link className="linklike" to="/cases">
+            ← Back to worklist
+          </Link>
         </div>
         {demoNote ? (
           <p className="banner" role="note">
@@ -202,25 +214,25 @@ export function Investigation() {
       </nav>
 
       <div className="case__body">
-        {tab === 'SUMMARY' ? (
-          <section className="panel">
-            <h2 className="panel__title">Summary</h2>
-            <p>
-              Identity:{' '}
-              {data.investigation_state === 'SOURCE_UNAVAILABLE' && data.clarification_reason
-                ? 'Not searched'
-                : humanizeState(data.company_identity_status ?? 'NOT_VERIFIED')}
-            </p>
-            <p>Completeness: {humanizeState(data.completeness_state ?? 'NOT ASSESSED')}</p>
-            <p>
-              {data.clarification_reason ??
-                data.company_match_basis ??
-                'No authoritative resolution has been recorded.'}
-            </p>
-            <p>
-              <Link to="/cases">← Back to worklist</Link>
-            </p>
-          </section>
+        {tab === 'BOARD' ? (
+          board.isPending ? (
+            <LoadingState label="Building the investigation board…" rows={6} />
+          ) : (
+            <InvestigationBoard
+              rows={board.data?.rows ?? []}
+              onOpenSources={() => setDrawerOpen(true)}
+            />
+          )
+        ) : null}
+
+        {tab === 'MAP' ? (
+          graph.isPending ? (
+            <LoadingState label="Building the relationship map…" rows={4} />
+          ) : (
+            <RelationshipMap
+              graph={graph.data ?? { investigation_id: id, nodes: [], edges: [] }}
+            />
+          )
         ) : null}
 
         {tab === 'COMPANY' ? (
@@ -423,7 +435,15 @@ export function Investigation() {
             <h2 className="panel__title">Findings</h2>
             {findings.data?.map((item) => (
               <article key={item.finding_id}>
-                <h3>{item.title}</h3>
+                <h3>
+                  {item.title}{' '}
+                  <span className="badge" role="note">
+                    {humanizeState(item.finding_type)}
+                  </span>
+                </h3>
+                <p>
+                  <strong>Claim:</strong> {item.claim_text}
+                </p>
                 <p>{item.assessment_text}</p>
                 <p>
                   <strong>Evidence:</strong> {item.evidence_text}

@@ -123,6 +123,11 @@ class FixtureDomainProvider:
             return DomainRecord(
                 domain=norm, registered_on="2025-03-01", registrar="fixture-registrar"
             )
+        if norm == "zenith-global.example.test":
+            # Domain registered long after the claimed 2008 operating history (demo).
+            return DomainRecord(
+                domain=norm, registered_on="2024-06-01", registrar="fixture-registrar"
+            )
         return None
 
 
@@ -158,6 +163,11 @@ class FixtureWebResearchProvider:
                 "Meridian Energy Supplies — Company profile",
                 "https://meridian-energy.example.test/company",
                 "Fictional public company profile for management demonstration.",
+            ),
+            "zenith global traders": (
+                "Zenith Global Traders — Company profile",
+                "https://zenith-global.example.test/about",
+                "Fictional company profile used to demonstrate contradiction detection.",
             ),
         }
         for company, (title, url, excerpt) in pages.items():
@@ -210,6 +220,10 @@ class FixtureWebResearchProvider:
             "https://meridian-energy.example.test/company": (
                 "Meridian Energy Supplies Ltd is a fictional supplier used only for the ARIE "
                 "Sentinel management demonstration."
+            ),
+            "https://zenith-global.example.test/about": (
+                "Zenith Global Traders Ltd is a fictional company used to demonstrate "
+                "contradiction detection; its stated history conflicts with the registry."
             ),
             "https://www.ariefinance.com/": (
                 "ARIE Finance Ltd identifies itself on its public website as a Mauritius-based "

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from arie_sentinel.config import Settings
 from arie_sentinel.db import SessionLocal
 from arie_sentinel.demo_cases import demo_case_context
-from arie_sentinel.demo_dataset import PUBLIC_VALIDATION_CASE, iter_seed_cases
+from arie_sentinel.demo_dataset import PUBLIC_VALIDATION_CASE, SEED_CLAIMS, iter_seed_cases
 from arie_sentinel.models.core import Investigation
 from arie_sentinel.services.investigations import (
     create_investigation,
@@ -43,6 +43,7 @@ if settings.env.lower() == "demo" and settings.provider_mode == "fixture":
                 company_label=company_label,
                 contact_label=contact_label,
                 actor=settings.dev_manager_email,
+                claims=SEED_CLAIMS.get(company_label),
             )
             created += 1
         session.commit()

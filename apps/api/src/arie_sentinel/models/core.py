@@ -155,6 +155,26 @@ class Investigation(Base, TimestampMixin):
         value = (self.case_context or {}).get("demo_case_type")
         return value if isinstance(value, str) else None
 
+    @property
+    def investigation_context(self) -> str | None:
+        """Optional analyst-supplied context (e.g. supplier, introducer). Never a fact.
+
+        Context only affects ordering/emphasis and recommended follow-ups; it never
+        changes what the evidence establishes.
+        """
+        value = (self.case_context or {}).get("investigation_context")
+        return value if isinstance(value, str) else None
+
+    @property
+    def claims(self) -> dict[str, Any]:
+        """Subject-supplied claims to be tested against discovered evidence.
+
+        Non-evidentiary intake inputs (e.g. claimed operating-since year, claimed
+        registration number, claimed licence). Compared by the contradiction engine.
+        """
+        value = (self.case_context or {}).get("claims")
+        return value if isinstance(value, dict) else {}
+
     __table_args__ = (
         # A row is identified by (batch, source row index) — NOT by label content.
         # This makes re-processing a batch idempotent while allowing two rows with

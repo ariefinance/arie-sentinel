@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     opensanctions_api_key: str | None = None
     opensanctions_dataset: str = "default"
     rdap_base_url: str = "https://rdap.org"
+    # Free, no-key public sources (US SEC filers; public-news discovery).
+    sec_edgar_base_url: str = "https://efts.sec.gov"
+    gdelt_base_url: str = "https://api.gdeltproject.org"
     web_search_base_url: str | None = None
     web_search_api_key: str | None = None
     web_search_provider: str = "structured"

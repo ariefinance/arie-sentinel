@@ -57,6 +57,23 @@ class ScreeningState(str, enum.Enum):
     CONFIRMED_MATCH = "CONFIRMED_MATCH"
 
 
+class EvidenceState(str, enum.Enum):
+    """Explicit evidence language for board/report items — never green/amber/red.
+
+    Uncertainty is preserved, not converted into false certainty. Screening keeps
+    its own ScreeningState vocabulary; these describe every other investigation item.
+    """
+
+    CONFIRMED = "CONFIRMED"  # established by an authoritative/primary source
+    CORROBORATED = "CORROBORATED"  # supported by independent/secondary sources
+    REPORTED = "REPORTED"  # stated by a source, not independently established
+    CLAIMED = "CLAIMED"  # asserted by the subject / a company-controlled source
+    UNVERIFIED = "UNVERIFIED"  # no reliable evidence located either way
+    CONTRADICTED = "CONTRADICTED"  # evidence conflicts with a claim
+    NOT_ASSESSED = "NOT_ASSESSED"  # not in scope / not attempted for this case
+    SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"  # a material source could not be reached
+
+
 class FindingType(str, enum.Enum):
     CONTRADICTION = "CONTRADICTION"
     INCONSISTENCY = "INCONSISTENCY"

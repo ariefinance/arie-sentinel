@@ -16,10 +16,12 @@ from .base import (
     WebResearchProvider,
     WebResult,
 )
+from .gdelt import GdeltNewsProvider
 from .gleif import GleifProvider
 from .opencorporates import OpenCorporatesProvider
 from .opensanctions import OpenSanctionsProvider
 from .rdap import RdapDomainProvider
+from .sec_edgar import SecEdgarProvider
 from .web_search import StructuredWebSearchProvider
 
 
@@ -30,6 +32,9 @@ class Providers:
     domain: DomainProvider
     web: WebResearchProvider
     gleif: GleifProvider | None = None
+    # Free, no-key supplementary sources (US-only corroboration; news discovery).
+    sec: SecEdgarProvider | None = None
+    news: GdeltNewsProvider | None = None
 
 
 class UnavailableScreeningProvider:
@@ -86,4 +91,6 @@ def build_providers(settings: Settings) -> Providers:
         domain=RdapDomainProvider(settings.rdap_base_url, settings.provider_timeout_seconds),
         web=web,
         gleif=GleifProvider(settings.gleif_base_url, settings.provider_timeout_seconds),
+        sec=SecEdgarProvider(settings.sec_edgar_base_url, settings.provider_timeout_seconds),
+        news=GdeltNewsProvider(settings.gdelt_base_url, settings.provider_timeout_seconds),
     )

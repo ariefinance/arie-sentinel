@@ -49,6 +49,7 @@ from ..providers.base import (
 )
 from ..providers.factory import Providers, build_providers
 from ..providers.normalization import normalize_entity_name
+from .contradictions import run_contradiction_checks
 
 # A material source that could not be reached OR returned malformed data is
 # handled the same way: an explicit source-unavailable/limited state, never a
@@ -124,6 +125,8 @@ def create_investigation(
     contact_label: str,
     actor: str,
     case_context: dict[str, Any] | None = None,
+    investigation_context: str | None = None,
+    claims: dict[str, Any] | None = None,
     import_batch_id: uuid.UUID | None = None,
     source_row_ref: str | None = None,
 ) -> Investigation:
@@ -131,6 +134,13 @@ def create_investigation(
     normalized_contact = contact_label or ""
     assessment = assess_intake(company_label, normalized_contact)
     stored_context = dict(case_context or {})
+    # Optional analyst context + subject claims are non-evidentiary intake inputs
+    # stored alongside case context; they steer emphasis and feed the contradiction
+    # engine, never the facts themselves.
+    if investigation_context:
+        stored_context.setdefault("investigation_context", investigation_context)
+    if claims:
+        stored_context.setdefault("claims", claims)
     if get_settings().provider_mode == "fixture":
         for key, value in demo_case_context(company_label).items():
             stored_context.setdefault(key, value)
@@ -475,6 +485,7 @@ def run_enrichment(
                 )
             )
     _run_public_intelligence(session, investigation, active_providers)
+    run_contradiction_checks(session, investigation, candidate)
     investigation.investigation_state = InvestigationState.COMPLETED
     record_audit(
         session,

@@ -24,6 +24,9 @@ from .models.enums import (
 class CreateInvestigationRequest(BaseModel):
     company_label: str = Field(min_length=1, max_length=512)
     contact_label: str = Field(default="", max_length=512)
+    # Optional, non-evidentiary: steer emphasis and feed the contradiction engine.
+    investigation_context: str | None = Field(default=None, max_length=64)
+    claims: dict[str, object] | None = None
 
 
 class PersonCandidateOut(BaseModel):
@@ -74,6 +77,7 @@ class InvestigationOut(BaseModel):
     company_label: str
     contact_label: str
     case_type: str | None = None
+    investigation_context: str | None = None
     intake_state: IntakeState
     clarification_reason: str | None
     investigation_state: InvestigationState
@@ -186,3 +190,40 @@ class FindingOut(BaseModel):
     related_evidence_ids: list[uuid.UUID] | None
     review_status: ReviewStatus
     created_at: datetime
+
+
+class BoardRowOut(BaseModel):
+    key: str
+    label: str
+    state: str
+    detail: str
+    action_required: bool
+    source_ids: list[uuid.UUID]
+
+
+class InvestigationBoardOut(BaseModel):
+    investigation_id: uuid.UUID
+    investigation_context: str | None = None
+    rows: list[BoardRowOut]
+
+
+class GraphNodeOut(BaseModel):
+    id: str
+    type: str
+    label: str
+    detail: str
+
+
+class GraphEdgeOut(BaseModel):
+    source: str
+    target: str
+    type: str
+    basis: str
+    state: str
+    source_ids: list[uuid.UUID]
+
+
+class RelationshipGraphOut(BaseModel):
+    investigation_id: uuid.UUID
+    nodes: list[GraphNodeOut]
+    edges: list[GraphEdgeOut]
