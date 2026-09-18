@@ -18,8 +18,13 @@ class OpenCorporatesProvider:
         self.api_key = api_key
         self.client = httpx.Client(timeout=timeout, follow_redirects=True)
 
-    def discover_candidates(self, company_label: str) -> list[CandidateEntity]:
+    def discover_candidates(
+        self, company_label: str, jurisdiction: str | None = None
+    ) -> list[CandidateEntity]:
+        # Paid provider, retained only for parity/tests; not on the free live path.
         params = {"q": company_label, "order": "score"}
+        if jurisdiction and len(jurisdiction) == 2 and jurisdiction.isalpha():
+            params["jurisdiction_code"] = jurisdiction.lower()
         if self.api_key:
             params["api_token"] = self.api_key
         payload = request_json(

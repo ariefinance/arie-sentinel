@@ -48,6 +48,21 @@ const CONTEXTS = [
   'Other',
 ] as const;
 
+// Optional routing hint only. GB is served by the free UK Companies House registry;
+// any jurisdiction is served by free GLEIF legal-name search. It is stored as a subject
+// claim, never a confirmed fact.
+const JURISDICTIONS = [
+  { code: '', label: 'Unknown / not specified' },
+  { code: 'GB', label: 'United Kingdom (GB) — Companies House' },
+  { code: 'US', label: 'United States (US)' },
+  { code: 'DE', label: 'Germany (DE)' },
+  { code: 'FR', label: 'France (FR)' },
+  { code: 'NL', label: 'Netherlands (NL)' },
+  { code: 'IE', label: 'Ireland (IE)' },
+  { code: 'SG', label: 'Singapore (SG)' },
+  { code: 'AE', label: 'United Arab Emirates (AE)' },
+] as const;
+
 /**
  * Investigate (UI-UX-SPEC.md §1): capture the two raw management labels and
  * launch. Centred, single column, uncluttered. The single investigation is the
@@ -60,6 +75,7 @@ export function Investigate() {
   const [company, setCompany] = useState('');
   const [contact, setContact] = useState('');
   const [context, setContext] = useState('');
+  const [jurisdiction, setJurisdiction] = useState('');
   const [operatingSince, setOperatingSince] = useState('');
   const [registration, setRegistration] = useState('');
   const [website, setWebsite] = useState('');
@@ -73,6 +89,7 @@ export function Investigate() {
 
     // Claims are optional inputs tested against discovered evidence — never facts.
     const claims: Record<string, unknown> = {};
+    if (jurisdiction) claims.jurisdiction = jurisdiction;
     if (operatingSince.trim()) claims.operating_since_year = operatingSince.trim();
     if (registration.trim()) claims.registration_number = registration.trim();
     if (website.trim()) claims.website = website.trim();
@@ -142,6 +159,26 @@ export function Investigate() {
               {CONTEXTS.map((option) => (
                 <option key={option} value={option}>
                   {option || 'No context'}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span className="field__label">Jurisdiction</span>
+            <span className="field__hint">
+              Optional routing hint. GB uses the free UK Companies House registry; any
+              jurisdiction is searched via free GLEIF. Stored as a claim, never a confirmed
+              fact.
+            </span>
+            <select
+              className="field__input"
+              value={jurisdiction}
+              onChange={(e) => setJurisdiction(e.target.value)}
+            >
+              {JURISDICTIONS.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.label}
                 </option>
               ))}
             </select>

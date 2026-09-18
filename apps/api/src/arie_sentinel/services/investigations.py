@@ -45,6 +45,7 @@ from ..providers import DemoDatasetUnsupported, ProviderUnavailable
 from ..providers.base import (
     CandidateEntity,
     ProviderInvalidResponse,
+    RegistryCoverageUnavailable,
     ScreeningSubject,
 )
 from ..providers.factory import Providers, build_providers
@@ -193,6 +194,19 @@ def create_investigation(
     return investigation
 
 
+def _jurisdiction_hint(inv: Investigation) -> str | None:
+    """Return the optional analyst-supplied jurisdiction routing hint, if any.
+
+    Sourced from the intake claim / case context (never a discovered fact); it only
+    steers which free authoritative registry is consulted.
+    """
+    for source in (inv.claims, inv.case_context or {}):
+        value = source.get("jurisdiction")
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
+
+
 def run_discovery(
     session: Session,
     investigation_id: uuid.UUID,
@@ -209,8 +223,32 @@ def run_discovery(
 
     inv.investigation_state = InvestigationState.RUNNING
 
+    jurisdiction_hint = _jurisdiction_hint(inv)
     try:
-        candidates = providers.registry.discover_candidates(inv.company_label)
+        candidates = providers.registry.discover_candidates(
+            inv.company_label, jurisdiction=jurisdiction_hint
+        )
+    except RegistryCoverageUnavailable as exc:
+        # No FREE authoritative registry covers this jurisdiction. This is an explicit
+        # coverage limitation, NOT a source outage and NOT a nonexistence finding.
+        inv.investigation_state = InvestigationState.COMPLETED
+        inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
+        inv.clarification_reason = str(exc)
+        record_audit(
+            session,
+            actor="adapter:free_registry",
+            action=AuditAction.STATE_CHANGE,
+            object_type="investigation",
+            investigation_id=inv.investigation_id,
+            rationale=str(exc),
+            payload={
+                "investigation_state": inv.investigation_state.value,
+                "coverage": "free-registry-unavailable",
+                "jurisdiction_hint": jurisdiction_hint,
+            },
+        )
+        return
     except DemoDatasetUnsupported as exc:
         inv.investigation_state = InvestigationState.SOURCE_UNAVAILABLE
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS

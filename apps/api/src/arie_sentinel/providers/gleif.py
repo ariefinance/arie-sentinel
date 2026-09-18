@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import httpx
 
-from .base import ProviderInvalidResponse, ProviderUnavailable
+from .base import CandidateEntity, ProviderInvalidResponse, ProviderUnavailable
 from .http import request_json
 
 
@@ -12,6 +14,97 @@ class GleifProvider:
     def __init__(self, base_url: str, timeout: float = 15.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.client = httpx.Client(timeout=timeout, follow_redirects=True)
+
+    def search_by_name(
+        self, company_label: str, jurisdiction: str | None = None
+    ) -> list[CandidateEntity]:
+        """Free GLEIF legal-name search (any jurisdiction).
+
+        Returns 0..N LEI-registered candidates. An empty result means "no LEI located"
+        — an absence, never a nonexistence finding and never fabricated. Optionally
+        filtered by the analyst-supplied jurisdiction hint.
+        """
+        params: dict[str, str] = {
+            "filter[entity.legalName]": company_label,
+            "page[size]": "10",
+        }
+        juris = (jurisdiction or "").strip().upper()
+        if len(juris) == 2 and juris.isalpha():
+            params["filter[entity.jurisdiction]"] = juris
+        payload = request_json(
+            self.client,
+            "GET",
+            f"{self.base_url}/lei-records",
+            provider="gleif",
+            params=params,
+        )
+        records = payload.get("data")
+        if records is None:
+            return []
+        if not isinstance(records, list):
+            raise ProviderInvalidResponse("gleif: data must be a list")
+        retrieved = datetime.now(UTC).isoformat()
+        candidates: list[CandidateEntity] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            lei = record.get("id")
+            attributes = record.get("attributes")
+            if not isinstance(attributes, dict) or not isinstance(lei, str):
+                continue
+            entity = attributes.get("entity")
+            if not isinstance(entity, dict):
+                continue
+            legal_name_obj = entity.get("legalName")
+            legal_name = (
+                legal_name_obj.get("name") if isinstance(legal_name_obj, dict) else None
+            )
+            if not isinstance(legal_name, str) or not legal_name.strip():
+                continue
+            status_obj = entity.get("status")
+            address_obj = entity.get("legalAddress")
+            address_text = None
+            if isinstance(address_obj, dict):
+                parts = [
+                    address_obj.get(k)
+                    for k in ("addressLines", "city", "region", "postalCode", "country")
+                ]
+                flat: list[str] = []
+                for part in parts:
+                    if isinstance(part, list):
+                        flat += [str(p) for p in part if p]
+                    elif isinstance(part, str) and part:
+                        flat.append(part)
+                address_text = ", ".join(flat) or None
+            other_names = entity.get("otherNames")
+            aliases: tuple[str, ...] = ()
+            if isinstance(other_names, list):
+                aliases = tuple(
+                    str(item.get("name"))
+                    for item in other_names
+                    if isinstance(item, dict) and isinstance(item.get("name"), str)
+                )
+            candidates.append(
+                CandidateEntity(
+                    legal_name=legal_name,
+                    jurisdiction=entity.get("jurisdiction")
+                    if isinstance(entity.get("jurisdiction"), str)
+                    else None,
+                    registry_class="gleif",
+                    registry_id=lei,
+                    status=status_obj if isinstance(status_obj, str) else None,
+                    registered_address=address_text,
+                    alternative_names=aliases,
+                    source_ref=f"{self.base_url}/lei-records/{lei}",
+                    retrieved_at=retrieved,
+                    match_basis=(
+                        "GLEIF legal-name search (LEI issuers, any jurisdiction); "
+                        "candidate until authoritative analyst resolution"
+                    ),
+                    extra={"lei": lei},
+                )
+            )
+        return candidates
 
     def lookup_lei(self, lei: str) -> dict[str, object] | None:
         payload = request_json(

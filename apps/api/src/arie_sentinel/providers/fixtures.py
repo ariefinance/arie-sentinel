@@ -29,7 +29,11 @@ from .base import (
 class FixtureCorporateRegistryProvider:
     """Deterministic registry lookup over the exact supported demo aliases."""
 
-    def discover_candidates(self, company_label: str) -> list[CandidateEntity]:
+    def discover_candidates(
+        self, company_label: str, jurisdiction: str | None = None
+    ) -> list[CandidateEntity]:
+        # Jurisdiction is accepted for protocol parity; the deterministic demo dataset
+        # is keyed on the exact normalised label, so the hint does not alter routing.
         norm = normalise_label(company_label)
         tokens = set(re.findall(r"[a-z0-9]+", norm))
 

@@ -358,7 +358,7 @@ class _InvalidScreening:
 
 
 class _InvalidRegistry:
-    def discover_candidates(self, company_label: str) -> list:
+    def discover_candidates(self, company_label: str, jurisdiction: str | None = None) -> list:
         raise ProviderInvalidResponse("malformed registry payload")
 
 
