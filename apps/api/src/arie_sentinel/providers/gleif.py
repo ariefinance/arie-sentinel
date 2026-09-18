@@ -56,9 +56,7 @@ class GleifProvider:
             if not isinstance(entity, dict):
                 continue
             legal_name_obj = entity.get("legalName")
-            legal_name = (
-                legal_name_obj.get("name") if isinstance(legal_name_obj, dict) else None
-            )
+            legal_name = legal_name_obj.get("name") if isinstance(legal_name_obj, dict) else None
             if not isinstance(legal_name, str) or not legal_name.strip():
                 continue
             status_obj = entity.get("status")

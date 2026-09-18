@@ -37,15 +37,23 @@ class _FakeCH:
 
     def get_officers(self, number: str):
         return [
-            {"name": "Robert Vance", "position": "director", "start_date": "2015-01-01",
-             "end_date": None},
+            {
+                "name": "Robert Vance",
+                "position": "director",
+                "start_date": "2015-01-01",
+                "end_date": None,
+            },
         ]
 
     def get_psc(self, number: str):
         return [
-            {"name": "Helena Ward", "kind": "individual-person-with-significant-control",
-             "natures_of_control": ["ownership-of-shares-75-to-100-percent"],
-             "notified_on": "2016-04-06", "ceased_on": None},
+            {
+                "name": "Helena Ward",
+                "kind": "individual-person-with-significant-control",
+                "natures_of_control": ["ownership-of-shares-75-to-100-percent"],
+                "notified_on": "2016-04-06",
+                "ceased_on": None,
+            },
         ]
 
 

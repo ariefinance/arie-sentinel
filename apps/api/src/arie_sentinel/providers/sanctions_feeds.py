@@ -194,11 +194,7 @@ def parse_eu_fsf(payload: bytes) -> list[SanctionedEntity]:
             subject_type = (st.get("code") or st.get("classificationCode") or "").lower()
             break
         entity_type = "person" if "person" in subject_type else "entity"
-        names = [
-            n.get("wholeName")
-            for n in _iter_local(record, "nameAlias")
-            if n.get("wholeName")
-        ]
+        names = [n.get("wholeName") for n in _iter_local(record, "nameAlias") if n.get("wholeName")]
         # Assemble a whole name from parts when wholeName is absent.
         if not names:
             for n in _iter_local(record, "nameAlias"):

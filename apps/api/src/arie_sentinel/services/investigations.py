@@ -735,7 +735,10 @@ def _run_companies_house_officers(
         officers = companies_house.get_officers(registry_id)
     except _SOURCE_FAILURE as exc:
         _note_supplementary_limitation(
-            session, inv, actor="adapter:companies_house", source="companies_house_officers",
+            session,
+            inv,
+            actor="adapter:companies_house",
+            source="companies_house_officers",
             reason=str(exc),
         )
         return
@@ -755,9 +758,7 @@ def _run_companies_house_officers(
             ),
             retrieved_at=datetime.now(UTC),
             captured_by="adapter:companies_house",
-            limitations=(
-                "UK Companies House officer appointment for the resolved company number."
-            ),
+            limitations=("UK Companies House officer appointment for the resolved company number."),
             license_class="public-government-source",
         )
         session.add(source)
@@ -796,7 +797,10 @@ def _run_companies_house_psc(
         pscs = companies_house.get_psc(registry_id)
     except _SOURCE_FAILURE as exc:
         _note_supplementary_limitation(
-            session, inv, actor="adapter:companies_house", source="companies_house_psc",
+            session,
+            inv,
+            actor="adapter:companies_house",
+            source="companies_house_psc",
             reason=str(exc),
         )
         return
