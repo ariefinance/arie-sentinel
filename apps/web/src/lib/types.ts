@@ -66,6 +66,7 @@ export interface InvestigationOut {
   company_label: string;
   contact_label: string;
   case_type: string | null;
+  investigation_context: string | null;
   intake_state: IntakeState;
   clarification_reason: string | null;
   investigation_state: InvestigationState;
@@ -112,6 +113,57 @@ export interface HealthOut {
 export interface CreateInvestigationBody {
   company_label: string;
   contact_label?: string;
+  investigation_context?: string | null;
+  claims?: Record<string, unknown> | null;
+}
+
+/** Explicit evidence language for board/report items — never colour alone. */
+export type EvidenceState =
+  | 'CONFIRMED'
+  | 'CORROBORATED'
+  | 'REPORTED'
+  | 'CLAIMED'
+  | 'UNVERIFIED'
+  | 'CONTRADICTED'
+  | 'NOT_ASSESSED'
+  | 'SOURCE_UNAVAILABLE'
+  | (string & {});
+
+export interface BoardRowOut {
+  key: string;
+  label: string;
+  state: string;
+  detail: string;
+  action_required: boolean;
+  source_ids: string[];
+}
+
+export interface InvestigationBoardOut {
+  investigation_id: string;
+  investigation_context: string | null;
+  rows: BoardRowOut[];
+}
+
+export interface GraphNodeOut {
+  id: string;
+  type: string;
+  label: string;
+  detail: string;
+}
+
+export interface GraphEdgeOut {
+  source: string;
+  target: string;
+  type: string;
+  basis: string;
+  state: string;
+  source_ids: string[];
+}
+
+export interface RelationshipGraphOut {
+  investigation_id: string;
+  nodes: GraphNodeOut[];
+  edges: GraphEdgeOut[];
 }
 
 export interface SourceOut {

@@ -45,10 +45,14 @@ from ..providers import DemoDatasetUnsupported, ProviderUnavailable
 from ..providers.base import (
     CandidateEntity,
     ProviderInvalidResponse,
+    RegistryCoverageUnavailable,
     ScreeningSubject,
 )
 from ..providers.factory import Providers, build_providers
 from ..providers.normalization import normalize_entity_name
+from ..providers.sanctions import OfficialSanctionsProvider
+from .contradictions import run_contradiction_checks
+from .sanctions_cache import CoverageReport, load_sanctions_matcher
 
 # A material source that could not be reached OR returned malformed data is
 # handled the same way: an explicit source-unavailable/limited state, never a
@@ -124,6 +128,8 @@ def create_investigation(
     contact_label: str,
     actor: str,
     case_context: dict[str, Any] | None = None,
+    investigation_context: str | None = None,
+    claims: dict[str, Any] | None = None,
     import_batch_id: uuid.UUID | None = None,
     source_row_ref: str | None = None,
 ) -> Investigation:
@@ -131,6 +137,13 @@ def create_investigation(
     normalized_contact = contact_label or ""
     assessment = assess_intake(company_label, normalized_contact)
     stored_context = dict(case_context or {})
+    # Optional analyst context + subject claims are non-evidentiary intake inputs
+    # stored alongside case context; they steer emphasis and feed the contradiction
+    # engine, never the facts themselves.
+    if investigation_context:
+        stored_context.setdefault("investigation_context", investigation_context)
+    if claims:
+        stored_context.setdefault("claims", claims)
     if get_settings().provider_mode == "fixture":
         for key, value in demo_case_context(company_label).items():
             stored_context.setdefault(key, value)
@@ -183,6 +196,19 @@ def create_investigation(
     return investigation
 
 
+def _jurisdiction_hint(inv: Investigation) -> str | None:
+    """Return the optional analyst-supplied jurisdiction routing hint, if any.
+
+    Sourced from the intake claim / case context (never a discovered fact); it only
+    steers which free authoritative registry is consulted.
+    """
+    for source in (inv.claims, inv.case_context or {}):
+        value = source.get("jurisdiction")
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
+
+
 def run_discovery(
     session: Session,
     investigation_id: uuid.UUID,
@@ -199,8 +225,34 @@ def run_discovery(
 
     inv.investigation_state = InvestigationState.RUNNING
 
+    jurisdiction_hint = _jurisdiction_hint(inv)
     try:
-        candidates = providers.registry.discover_candidates(inv.company_label)
+        candidates = providers.registry.discover_candidates(
+            inv.company_label, jurisdiction=jurisdiction_hint
+        )
+    except RegistryCoverageUnavailable as exc:
+        # No FREE authoritative registry covers this jurisdiction. This is an explicit
+        # coverage limitation, NOT a source outage and NOT a nonexistence finding. Legal
+        # identity stays NOT_VERIFIED and no Counterparty is created — but the safe checks
+        # that do not require a resolved legal entity STILL run, so an SME outside GB and
+        # outside the LEI population is not left with an empty investigation.
+        inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
+        inv.clarification_reason = str(exc)
+        record_audit(
+            session,
+            actor="adapter:free_registry",
+            action=AuditAction.STATE_CHANGE,
+            object_type="investigation",
+            investigation_id=inv.investigation_id,
+            rationale=str(exc),
+            payload={
+                "coverage": "free-registry-unavailable",
+                "jurisdiction_hint": jurisdiction_hint,
+            },
+        )
+        _run_unresolved_checks(session, inv, providers)
+        return
     except DemoDatasetUnsupported as exc:
         inv.investigation_state = InvestigationState.SOURCE_UNAVAILABLE
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
@@ -320,9 +372,12 @@ def run_discovery(
         )
 
     if len(candidates) == 0:
+        # A covered registry returned no candidate: identity stays NOT_VERIFIED, but the
+        # safe non-registry checks still run (website/RDAP, public intelligence, GDELT,
+        # name screening) rather than ending the investigation empty.
         inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
-        inv.investigation_state = InvestigationState.COMPLETED
+        _run_unresolved_checks(session, inv, providers)
     else:
         inv.company_identity_status = CompanyIdentityStatus.AMBIGUOUS
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
@@ -336,6 +391,41 @@ def run_discovery(
             rationale="Registry search produced candidates; analyst resolution required.",
             payload={"candidate_count": len(candidates)},
         )
+
+
+def _run_unresolved_checks(
+    session: Session, inv: Investigation, providers: Providers | Any
+) -> None:
+    """Run the safe checks that do NOT require a resolved authoritative legal entity.
+
+    Used when legal identity could not be resolved (no free registry coverage, or no
+    candidate). Legal identity remains NOT_VERIFIED and NO Counterparty is created; these
+    checks operate on the raw supplied label + intake claims only. Sanctions screening is
+    performed against the unresolved label with an explicit unresolved-identity caveat.
+    """
+    record_audit(
+        session,
+        actor="system:unresolved_checks",
+        action=AuditAction.STATE_CHANGE,
+        object_type="investigation",
+        investigation_id=inv.investigation_id,
+        rationale=(
+            "Legal identity is unresolved; running safe non-registry checks "
+            "(website/RDAP, public intelligence, news discovery, name screening, "
+            "non-registry contradictions). Any screening result is against an unresolved "
+            "company label and cannot be attributed to a confirmed legal entity."
+        ),
+        payload={"mode": "unresolved-identity"},
+    )
+    # Screening against the unresolved label (entity=None -> no registry identifiers).
+    _run_screening(session, inv, providers, entity=None)
+    # Website/RDAP + public-web discovery (both consume the raw label + intake claims).
+    _run_public_intelligence(session, inv, providers)
+    # News discovery (GDELT); SEC/Companies House stay gated off without a resolved entity.
+    _run_supplementary_sources(session, inv, providers)
+    # Only contradictions that do not require authoritative registry facts.
+    run_contradiction_checks(session, inv, None)
+    inv.investigation_state = InvestigationState.COMPLETED
 
 
 def resolve_entity(
@@ -427,16 +517,11 @@ def run_enrichment(
         try:
             gleif_data = gleif.lookup_lei(candidate.lei)
         except _SOURCE_FAILURE as exc:
+            # LEI enrichment is supplementary (a missing LEI is never adverse), so a
+            # GLEIF outage is a coverage limitation, not a material-source failure.
             gleif_data = None
-            investigation.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
-            record_audit(
-                session,
-                actor="adapter:gleif",
-                action=AuditAction.STATE_CHANGE,
-                object_type="enrichment",
-                investigation_id=investigation_id,
-                rationale=str(exc),
-                payload={"source": "gleif", "status": "unavailable"},
+            _note_supplementary_limitation(
+                session, investigation, actor="adapter:gleif", source="gleif", reason=str(exc)
             )
         if gleif_data is not None:
             existing_identifier = session.scalar(
@@ -474,7 +559,10 @@ def run_enrichment(
                     extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
                 )
             )
+            _run_gleif_relationships(session, investigation, gleif, candidate.lei)
     _run_public_intelligence(session, investigation, active_providers)
+    _run_supplementary_sources(session, investigation, active_providers)
+    run_contradiction_checks(session, investigation, candidate)
     investigation.investigation_state = InvestigationState.COMPLETED
     record_audit(
         session,
@@ -485,6 +573,315 @@ def run_enrichment(
         target_ref=str(candidate_id),
         payload={"status": "completed"},
     )
+
+
+def _run_gleif_relationships(
+    session: Session, investigation: Investigation, gleif: Any, lei: str
+) -> None:
+    """Persist GLEIF direct parent/child relationships (free) with provenance."""
+    lookup_rel = getattr(gleif, "lookup_relationships", None)
+    if lookup_rel is None:
+        return
+    try:
+        relationships = lookup_rel(lei)
+    except _SOURCE_FAILURE:
+        return
+    parent_lei = relationships.get("parent_lei") if isinstance(relationships, dict) else None
+    child_leis = relationships.get("child_leis") if isinstance(relationships, dict) else None
+    child_list = [str(c) for c in child_leis] if isinstance(child_leis, list) else []
+    if not parent_lei and not child_list:
+        return
+    source = Source(
+        investigation_id=investigation.investigation_id,
+        source_class=SourceClass.CORPORATE_REGISTRY,
+        title=f"GLEIF relationships: {lei}",
+        origin_ref=f"{gleif.base_url}/lei-records/{lei}/direct-parent",
+        retrieved_at=datetime.now(UTC),
+        captured_by="adapter:gleif",
+        limitations="GLEIF direct parent/child relationships for the supplied LEI.",
+        license_class="GLEIF-public",
+    )
+    session.add(source)
+    session.flush()
+    session.add(
+        Evidence(
+            source_id=source.source_id,
+            observed_value={
+                "kind": "gleif_relationships",
+                "parent_lei": parent_lei,
+                "child_leis": child_list,
+            },
+            extracted_by="adapter:gleif",
+            extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+        )
+    )
+
+
+def _note_supplementary_limitation(
+    session: Session, inv: Investigation, *, actor: str, source: str, reason: str
+) -> None:
+    """Record a SUPPLEMENTARY-source outage without downgrading the whole case.
+
+    Supplementary sources (news discovery, US SEC corroboration, LEI enrichment) are
+    optional: their unavailability is a coverage limitation, never a material-source
+    failure. It must not overwrite a genuine MATERIAL_SOURCE_UNAVAILABLE already set.
+    """
+    if inv.completeness_state is not CompletenessState.MATERIAL_SOURCE_UNAVAILABLE:
+        inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+    record_audit(
+        session,
+        actor=actor,
+        action=AuditAction.STATE_CHANGE,
+        object_type="supplementary_source",
+        investigation_id=inv.investigation_id,
+        rationale=reason,
+        payload={"source": source, "status": "unavailable", "materiality": "supplementary"},
+    )
+
+
+def _run_supplementary_sources(
+    session: Session, inv: Investigation, providers: Providers | Any
+) -> None:
+    """Free, no-key supplementary sourcing: GDELT discovery, SEC (US), Companies House (GB).
+
+    All are optional and jurisdiction-gated; each fails closed to a source-unavailable
+    limitation and never asserts absence as adverse. Discovery leads are not evidence.
+    """
+    company = inv.counterparty.legal_name if inv.counterparty else inv.company_label
+    jurisdiction = ((inv.counterparty.jurisdiction if inv.counterparty else "") or "").upper()
+
+    news = getattr(providers, "news", None)
+    if news is not None:
+        try:
+            leads = news.search(company)
+        except _SOURCE_FAILURE as exc:
+            # GDELT is discovery-only (supplementary): its outage is a coverage
+            # limitation, not a material-source failure for the whole case.
+            _note_supplementary_limitation(
+                session, inv, actor="adapter:gdelt", source="gdelt", reason=str(exc)
+            )
+            leads = []
+        for lead in leads[:10]:
+            session.add(
+                Source(
+                    investigation_id=inv.investigation_id,
+                    source_class=SourceClass.WEB_PUBLIC,
+                    title=lead.title,
+                    origin_ref=lead.url,
+                    retrieved_at=_parse_time(lead.retrieved_at),
+                    captured_by="adapter:gdelt:discovery",
+                    limitations=(
+                        "Public-news discovery lead (GDELT); not evidence and not adverse "
+                        "by itself. Analyst review required."
+                    ),
+                    license_class="linked-public-source",
+                )
+            )
+
+    sec = getattr(providers, "sec", None)
+    if sec is not None and jurisdiction.startswith("US"):
+        try:
+            records = sec.search_company(company)
+        except _SOURCE_FAILURE as exc:
+            # SEC EDGAR is US corroboration-only (supplementary); most companies are not
+            # SEC filers, so its outage is a coverage limitation, not a material failure.
+            _note_supplementary_limitation(
+                session, inv, actor="adapter:sec_edgar", source="sec_edgar", reason=str(exc)
+            )
+            records = []
+        if records:
+            record = records[0]
+            sec_source = Source(
+                investigation_id=inv.investigation_id,
+                source_class=SourceClass.CORPORATE_REGISTRY,
+                title=f"SEC EDGAR: {record.name}",
+                origin_ref="https://www.sec.gov/cgi-bin/browse-edgar",
+                retrieved_at=datetime.now(UTC),
+                captured_by="adapter:sec_edgar",
+                limitations=(
+                    "US SEC filer record. Absence of an EDGAR record is not adverse — most "
+                    "companies are not SEC filers."
+                ),
+                license_class="public-sec",
+            )
+            session.add(sec_source)
+            session.flush()
+            session.add(
+                Evidence(
+                    source_id=sec_source.source_id,
+                    observed_value={
+                        "name": record.name,
+                        "cik": record.cik,
+                        "tickers": list(record.tickers),
+                    },
+                    extracted_by="adapter:sec_edgar",
+                    extraction_confidence=ExtractionConfidence.REPORTED,
+                )
+            )
+
+    companies_house = getattr(providers, "companies_house", None)
+    registry_id = inv.counterparty.registry_id if inv.counterparty else None
+    if companies_house is not None and jurisdiction.startswith("GB") and registry_id:
+        try:
+            profile = companies_house.get_company(registry_id)
+        except _SOURCE_FAILURE as exc:
+            inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+            record_audit(
+                session,
+                actor="adapter:companies_house",
+                action=AuditAction.STATE_CHANGE,
+                object_type="public_intelligence",
+                investigation_id=inv.investigation_id,
+                rationale=str(exc),
+                payload={"source": "companies_house", "status": "unavailable"},
+            )
+            profile = None
+        if profile is not None:
+            ch_source = Source(
+                investigation_id=inv.investigation_id,
+                source_class=SourceClass.CORPORATE_REGISTRY,
+                title=f"Companies House: {profile.name}",
+                origin_ref=f"https://find-and-update.company-information.service.gov.uk/company/{profile.company_number}",
+                retrieved_at=datetime.now(UTC),
+                captured_by="adapter:companies_house",
+                limitations="UK Companies House public record for the resolved company number.",
+                license_class="public-government-source",
+            )
+            session.add(ch_source)
+            session.flush()
+            session.add(
+                Evidence(
+                    source_id=ch_source.source_id,
+                    observed_value={
+                        "company_number": profile.company_number,
+                        "name": profile.name,
+                        "status": profile.status,
+                        "incorporation_date": profile.incorporation_date,
+                        "registered_address": profile.registered_address,
+                    },
+                    extracted_by="adapter:companies_house",
+                    extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+                )
+            )
+            _run_companies_house_officers(session, inv, companies_house, registry_id)
+            _run_companies_house_psc(session, inv, companies_house, registry_id)
+
+
+def _run_companies_house_officers(
+    session: Session, inv: Investigation, companies_house: Any, registry_id: str
+) -> None:
+    """Persist Companies House officers and corroborate the supplied contact (GB)."""
+    try:
+        officers = companies_house.get_officers(registry_id)
+    except _SOURCE_FAILURE as exc:
+        _note_supplementary_limitation(
+            session,
+            inv,
+            actor="adapter:companies_house",
+            source="companies_house_officers",
+            reason=str(exc),
+        )
+        return
+    contact_norm = normalize_entity_name(inv.contact_label) if inv.contact_label.strip() else None
+    for officer in officers:
+        name = officer.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        position = officer.get("position")
+        source = Source(
+            investigation_id=inv.investigation_id,
+            source_class=SourceClass.CORPORATE_REGISTRY,
+            title=f"Companies House officer: {name}",
+            origin_ref=(
+                "https://find-and-update.company-information.service.gov.uk/company/"
+                f"{registry_id}/officers"
+            ),
+            retrieved_at=datetime.now(UTC),
+            captured_by="adapter:companies_house",
+            limitations=("UK Companies House officer appointment for the resolved company number."),
+            license_class="public-government-source",
+        )
+        session.add(source)
+        session.flush()
+        session.add(
+            Evidence(
+                source_id=source.source_id,
+                observed_value={
+                    "name": name,
+                    "position": position,
+                    "start_date": officer.get("start_date"),
+                    "end_date": officer.get("end_date"),
+                    "registry_id": registry_id,
+                },
+                extracted_by="adapter:companies_house",
+                extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+            )
+        )
+        # Corroborate the supplied contact when an officer's normalized name matches.
+        if contact_norm and normalize_entity_name(name) == contact_norm:
+            for person in inv.candidates:
+                if normalize_entity_name(person.label_fragment) == contact_norm:
+                    person.relationship_state = RelationshipState.VERIFIED
+                    person.person_evidence_status = PersonEvidenceStatus.LIMITED_EVIDENCE
+                    person.match_basis = (
+                        "Companies House lists an officer with this normalized name for the "
+                        "resolved company; it does not conclusively verify the person's identity."
+                    )
+
+
+def _run_companies_house_psc(
+    session: Session, inv: Investigation, companies_house: Any, registry_id: str
+) -> None:
+    """Persist Companies House persons with significant control (GB)."""
+    try:
+        pscs = companies_house.get_psc(registry_id)
+    except _SOURCE_FAILURE as exc:
+        _note_supplementary_limitation(
+            session,
+            inv,
+            actor="adapter:companies_house",
+            source="companies_house_psc",
+            reason=str(exc),
+        )
+        return
+    for psc in pscs:
+        name = psc.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        natures = psc.get("natures_of_control")
+        source = Source(
+            investigation_id=inv.investigation_id,
+            source_class=SourceClass.CORPORATE_REGISTRY,
+            title=f"Companies House PSC: {name}",
+            origin_ref=(
+                "https://find-and-update.company-information.service.gov.uk/company/"
+                f"{registry_id}/persons-with-significant-control"
+            ),
+            retrieved_at=datetime.now(UTC),
+            captured_by="adapter:companies_house",
+            limitations=(
+                "UK Companies House person-with-significant-control record for the resolved "
+                "company number."
+            ),
+            license_class="public-government-source",
+        )
+        session.add(source)
+        session.flush()
+        session.add(
+            Evidence(
+                source_id=source.source_id,
+                observed_value={
+                    "kind": "psc",
+                    "name": name,
+                    "psc_kind": psc.get("kind"),
+                    "natures_of_control": natures if isinstance(natures, list) else [],
+                    "notified_on": psc.get("notified_on"),
+                    "registry_id": registry_id,
+                },
+                extracted_by="adapter:companies_house",
+                extraction_confidence=ExtractionConfidence.AUTHORITATIVE,
+            )
+        )
 
 
 def _public_validation_uses_fixture_providers(investigation: Investigation) -> bool:
@@ -657,6 +1054,12 @@ def _run_screening(
     entity: EntityCandidate | None = None,
 ) -> None:
     """Record screening hits for the counterparty + contact candidates (adjudicated later)."""
+    # Official sanctions feeds only: load the matcher from the local cache and capture
+    # coverage. "No material match" is only assertable when every required feed is fresh.
+    coverage: CoverageReport | None = None
+    screener = getattr(providers, "screening", None)
+    if isinstance(screener, OfficialSanctionsProvider):
+        screener, coverage = load_sanctions_matcher(session, get_settings())
     subjects = [_company_screening_subject(inv, entity)]
     subjects += [ScreeningSubject(label=c.label_fragment) for c in inv.candidates]
     highest = ScreeningState.NO_MATERIAL_MATCH
@@ -666,8 +1069,10 @@ def _run_screening(
         ScreeningState.MATCH_REQUIRES_REVIEW: 2,
         ScreeningState.CONFIRMED_MATCH: 3,
     }
+    if screener is None:
+        screener = providers.screening
     try:
-        result_sets = [(subject, providers.screening.screen(subject)) for subject in subjects]
+        result_sets = [(subject, screener.screen(subject)) for subject in subjects]
     except _SOURCE_FAILURE as exc:
         inv.screening_state = None
         inv.completeness_state = CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
@@ -687,9 +1092,12 @@ def _run_screening(
             title=f"Screening search: {subject.label}",
             origin_ref=None,
             retrieved_at=datetime.now(UTC),
-            captured_by="adapter:screening",
-            limitations="Matches require human disposition; normalized response retained only.",
-            license_class="OpenSanctions-commercial-license-required",
+            captured_by="adapter:official_sanctions",
+            limitations=(
+                "Screened against the cached official government sanctions feeds "
+                "(OFAC/UN/UK/EU). Matches require human disposition; never auto-confirmed."
+            ),
+            license_class="official-government-sanctions-feed",
         )
         session.add(source)
         session.flush()
@@ -731,7 +1139,33 @@ def _run_screening(
             )
             if order[state] > order[highest]:
                 highest = state
-    inv.screening_state = highest
+    # Coverage gate: "no material match" is only assertable when every required official
+    # feed is fresh in the cache. With incomplete coverage and no positive hit we must NOT
+    # claim a clear screen — record a limitation instead. Real hits still surface.
+    if (
+        coverage is not None
+        and not coverage.is_complete
+        and highest is ScreeningState.NO_MATERIAL_MATCH
+    ):
+        inv.screening_state = None
+        if inv.completeness_state is None:
+            inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
+        record_audit(
+            session,
+            actor="adapter:official_sanctions",
+            action=AuditAction.STATE_CHANGE,
+            object_type="screening",
+            investigation_id=inv.investigation_id,
+            target_ref="sanctions-coverage-incomplete",
+            rationale=coverage.limitation_text(),
+            payload={
+                "required": list(coverage.required),
+                "fresh": list(coverage.fresh),
+                "stale_or_missing": list(coverage.stale_or_missing),
+            },
+        )
+    else:
+        inv.screening_state = highest
     # Contact candidates: mark limited evidence (fixture) — never invents a person.
     for cand in inv.candidates:
         if cand.person_evidence_status is None:
@@ -939,6 +1373,12 @@ def _claimed_company_domains(inv: Investigation) -> dict[str, str]:
     context = inv.case_context or {}
     for key in ("company_domain", "domain", "website"):
         add(context.get(key), f"supplied case context field '{key}'")
+    # Subject-supplied claims are the live intake path (Investigate UI stores the
+    # website under claims). Consume the same values so a real analyst-entered
+    # website drives RDAP/domain enrichment, not only the demo fixtures.
+    claims = inv.claims
+    for key in ("company_domain", "domain", "website"):
+        add(claims.get(key), f"supplied intake claim '{key}'")
     if inv.counterparty is not None:
         for identifier in inv.counterparty.identifiers:
             if identifier.id_type.lower() in {"domain", "website"}:

@@ -30,6 +30,37 @@ const EXAMPLES = [
     company: 'Meridian Energy Supplies Ltd',
     contact: 'Amira Hassan',
   },
+  {
+    label: 'Try contradiction case',
+    company: 'Zenith Global Traders Ltd',
+    contact: 'Robert Vance',
+  },
+] as const;
+
+const CONTEXTS = [
+  '',
+  'Prospective client',
+  'Supplier / vendor',
+  'Introducer / intermediary',
+  'Business partner',
+  'Transaction counterparty',
+  'Investment / deal party',
+  'Other',
+] as const;
+
+// Optional routing hint only. GB is served by the free UK Companies House registry;
+// any jurisdiction is served by free GLEIF legal-name search. It is stored as a subject
+// claim, never a confirmed fact.
+const JURISDICTIONS = [
+  { code: '', label: 'Unknown / not specified' },
+  { code: 'GB', label: 'United Kingdom (GB) — Companies House' },
+  { code: 'US', label: 'United States (US)' },
+  { code: 'DE', label: 'Germany (DE)' },
+  { code: 'FR', label: 'France (FR)' },
+  { code: 'NL', label: 'Netherlands (NL)' },
+  { code: 'IE', label: 'Ireland (IE)' },
+  { code: 'SG', label: 'Singapore (SG)' },
+  { code: 'AE', label: 'United Arab Emirates (AE)' },
 ] as const;
 
 /**
@@ -43,6 +74,11 @@ export function Investigate() {
 
   const [company, setCompany] = useState('');
   const [contact, setContact] = useState('');
+  const [context, setContext] = useState('');
+  const [jurisdiction, setJurisdiction] = useState('');
+  const [operatingSince, setOperatingSince] = useState('');
+  const [registration, setRegistration] = useState('');
+  const [website, setWebsite] = useState('');
   const [touched, setTouched] = useState(false);
 
   const companyError = touched && company.trim() === '' ? 'Enter the company label.' : undefined;
@@ -51,8 +87,20 @@ export function Investigate() {
     setTouched(true);
     if (company.trim() === '') return;
 
+    // Claims are optional inputs tested against discovered evidence — never facts.
+    const claims: Record<string, unknown> = {};
+    if (jurisdiction) claims.jurisdiction = jurisdiction;
+    if (operatingSince.trim()) claims.operating_since_year = operatingSince.trim();
+    if (registration.trim()) claims.registration_number = registration.trim();
+    if (website.trim()) claims.website = website.trim();
+
     create.mutate(
-      { company_label: company.trim(), contact_label: contact.trim() },
+      {
+        company_label: company.trim(),
+        contact_label: contact.trim(),
+        investigation_context: context || null,
+        claims: Object.keys(claims).length > 0 ? claims : null,
+      },
       {
         onSuccess: (data) => {
           navigate(`/investigations/${data.investigation_id}`);
@@ -97,6 +145,74 @@ export function Investigate() {
             onChange={(e) => setContact(e.target.value)}
             autoComplete="off"
           />
+
+          <label className="field">
+            <span className="field__label">Investigation context</span>
+            <span className="field__hint">
+              Optional. Steers emphasis and follow-ups only — it never changes the facts.
+            </span>
+            <select
+              className="field__input"
+              value={context}
+              onChange={(e) => setContext(e.target.value)}
+            >
+              {CONTEXTS.map((option) => (
+                <option key={option} value={option}>
+                  {option || 'No context'}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span className="field__label">Jurisdiction</span>
+            <span className="field__hint">
+              Optional routing hint. GB uses the free UK Companies House registry; any
+              jurisdiction is searched via free GLEIF. Stored as a claim, never a confirmed
+              fact.
+            </span>
+            <select
+              className="field__input"
+              value={jurisdiction}
+              onChange={(e) => setJurisdiction(e.target.value)}
+            >
+              {JURISDICTIONS.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <details className="claims">
+            <summary>Add claims to verify (optional)</summary>
+            <p className="field__hint">
+              Anything the counterparty states about itself. Sentinel tests these against
+              discovered evidence and flags discrepancies for review — it does not treat a
+              discrepancy as wrongdoing.
+            </p>
+            <TextField
+              label="Claimed operating since (year)"
+              placeholder="e.g. 2008"
+              value={operatingSince}
+              onChange={(e) => setOperatingSince(e.target.value)}
+              autoComplete="off"
+            />
+            <TextField
+              label="Claimed registration number"
+              placeholder="e.g. 12345678"
+              value={registration}
+              onChange={(e) => setRegistration(e.target.value)}
+              autoComplete="off"
+            />
+            <TextField
+              label="Stated website"
+              placeholder="e.g. https://example.com"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              autoComplete="off"
+            />
+          </details>
 
           {submitError ? <ErrorState title="Could not start" message={submitError} /> : null}
 

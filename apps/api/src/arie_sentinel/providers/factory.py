@@ -16,10 +16,13 @@ from .base import (
     WebResearchProvider,
     WebResult,
 )
+from .companies_house import CompaniesHouseProvider, UnavailableCompaniesHouseProvider
+from .free_registry import FreeRegistryRouter
+from .gdelt import GdeltNewsProvider
 from .gleif import GleifProvider
-from .opencorporates import OpenCorporatesProvider
-from .opensanctions import OpenSanctionsProvider
 from .rdap import RdapDomainProvider
+from .sanctions import OfficialSanctionsProvider
+from .sec_edgar import SecEdgarProvider
 from .web_search import StructuredWebSearchProvider
 
 
@@ -30,6 +33,11 @@ class Providers:
     domain: DomainProvider
     web: WebResearchProvider
     gleif: GleifProvider | None = None
+    # Free, no-key supplementary sources (US-only corroboration; news discovery).
+    sec: SecEdgarProvider | None = None
+    news: GdeltNewsProvider | None = None
+    # UK Companies House (free key); Unavailable* when no key is configured.
+    companies_house: CompaniesHouseProvider | UnavailableCompaniesHouseProvider | None = None
 
 
 class UnavailableScreeningProvider:
@@ -67,23 +75,28 @@ def build_providers(settings: Settings) -> Providers:
         if settings.web_search_base_url
         else UnavailableWebResearchProvider()
     )
-    return Providers(
-        registry=OpenCorporatesProvider(
-            settings.opencorporates_base_url,
-            settings.opencorporates_api_key,
+    gleif = GleifProvider(settings.gleif_base_url, settings.provider_timeout_seconds)
+    companies_house: CompaniesHouseProvider | UnavailableCompaniesHouseProvider = (
+        CompaniesHouseProvider(
+            settings.companies_house_api_key,
+            settings.companies_house_base_url,
             settings.provider_timeout_seconds,
-        ),
-        screening=(
-            OpenSanctionsProvider(
-                settings.opensanctions_base_url,
-                settings.opensanctions_api_key,
-                settings.opensanctions_dataset,
-                settings.provider_timeout_seconds,
-            )
-            if settings.opensanctions_api_key
-            else UnavailableScreeningProvider()
-        ),
+        )
+        if settings.companies_house_api_key
+        else UnavailableCompaniesHouseProvider()
+    )
+    return Providers(
+        # FREE-ONLY discovery routing: GB→Companies House, any→GLEIF, else explicit
+        # coverage limitation. No paid OpenCorporates default anywhere on the live path.
+        registry=FreeRegistryRouter(companies_house=companies_house, gleif=gleif),
+        # Official government sanctions feeds only (no paid OpenSanctions). Fails closed
+        # until the feeds have been loaded from the cache, so an un-refreshed dataset is
+        # never silently reported as "no material match".
+        screening=OfficialSanctionsProvider(),
         domain=RdapDomainProvider(settings.rdap_base_url, settings.provider_timeout_seconds),
         web=web,
-        gleif=GleifProvider(settings.gleif_base_url, settings.provider_timeout_seconds),
+        gleif=gleif,
+        sec=SecEdgarProvider(settings.sec_edgar_base_url, settings.provider_timeout_seconds),
+        news=GdeltNewsProvider(settings.gdelt_base_url, settings.provider_timeout_seconds),
+        companies_house=companies_house,
     )

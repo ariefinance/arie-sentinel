@@ -10,9 +10,26 @@ from sqlalchemy.orm import Session
 
 from ..demo_cases import FICTIONAL_TEST_CASE, PUBLIC_VALIDATION_CASE
 from ..models.core import Investigation
-from ..models.enums import AuditAction, CompletenessState, ScreeningState, SourceClass
+from ..models.enums import (
+    AuditAction,
+    CompletenessState,
+    EvidenceState,
+    FindingType,
+    ReviewStatus,
+    ScreeningState,
+    SourceClass,
+)
 from ..models.evidence import Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
+from .board import build_board
+from .graph import build_graph
+
+_CONTRADICTION_TYPES = {
+    FindingType.CONTRADICTION,
+    FindingType.INCONSISTENCY,
+    FindingType.ANOMALY,
+    FindingType.UNVERIFIED_CLAIM,
+}
 
 
 def screening_summary(investigation: Investigation, screening: list[ScreeningResult]) -> str | None:
@@ -62,6 +79,60 @@ def demo_marker(investigation: Investigation) -> dict[str, str] | None:
     return None
 
 
+def report_headline(session: Session, investigation: Investigation) -> dict[str, str]:
+    """A transparent, non-scored headline. No risk %, no SAFE/FRAUD verdict.
+
+    Corroboration is defined explicitly:
+    - Strong  = identity confirmed, >=3 corroborating checks, no open contradictions;
+    - Partial = identity confirmed, no open contradictions, fewer corroborating checks;
+    - Limited = otherwise.
+    """
+    rows = {row.key: row for row in build_board(session, investigation)}
+    findings = session.scalars(
+        select(Finding).where(Finding.investigation_id == investigation.investigation_id)
+    ).all()
+    contradictions = [
+        f
+        for f in findings
+        if f.finding_type in _CONTRADICTION_TYPES and f.review_status is ReviewStatus.OPEN
+    ]
+    identity_confirmed = rows.get("legal_identity") is not None and rows[
+        "legal_identity"
+    ].state == (EvidenceState.CONFIRMED.value)
+    corroborating_keys = (
+        "directors_officers",
+        "domain_website",
+        "regulatory_footprint",
+        "contact_company",
+        "lei",
+    )
+    corroborating = sum(
+        1
+        for key in corroborating_keys
+        if key in rows
+        and rows[key].state in {EvidenceState.CONFIRMED.value, EvidenceState.CORROBORATED.value}
+    )
+    if identity_confirmed and corroborating >= 3 and not contradictions:
+        corroboration = "Strong"
+    elif identity_confirmed and not contradictions:
+        corroboration = "Partial"
+    else:
+        corroboration = "Limited"
+    unavailable = investigation.completeness_state is CompletenessState.MATERIAL_SOURCE_UNAVAILABLE
+    actions_row = rows.get("analyst_actions")
+    return {
+        "identity": "Confirmed" if identity_confirmed else "Not established",
+        "corroboration": corroboration,
+        "contradictions": (
+            f"{len(contradictions)} require review" if contradictions else "None established"
+        ),
+        "evidence_limitations": "1 or more material sources unavailable"
+        if unavailable
+        else "None material",
+        "analyst_actions": actions_row.detail if actions_row else "None outstanding",
+    }
+
+
 def _resolution_event(session: Session, investigation: Investigation) -> AuditEvent | None:
     """The analyst RESOLVE_IDENTITY audit event (actor, timestamp, rationale)."""
     return session.scalar(
@@ -104,6 +175,22 @@ def build_report_html(session: Session, investigation: Investigation) -> str:
         loader=PackageLoader("arie_sentinel", "templates"),
         autoescape=select_autoescape(["html"]),
     )
+    graph = build_graph(session, investigation)
+    related_entities = [n for n in graph.nodes if n.id != "company:subject"]
+    node_labels = {n.id: n.label for n in graph.nodes}
+    # Relationship provenance: FROM / RELATIONSHIP / TO / STATE / BASIS. A claim-only
+    # edge carries no source ids; the basis states that explicitly.
+    relationships = [
+        {
+            "from": node_labels.get(edge.source, edge.source),
+            "type": edge.type,
+            "to": node_labels.get(edge.target, edge.target),
+            "state": edge.state,
+            "basis": edge.basis,
+            "has_sources": bool(edge.source_ids),
+        }
+        for edge in graph.edges
+    ]
     return env.get_template("report.html").render(
         investigation=investigation,
         sources=sources,
@@ -114,6 +201,10 @@ def build_report_html(session: Session, investigation: Investigation) -> str:
         case_type_label=case_type_label(investigation),
         demo_marker=demo_marker(investigation),
         resolution_event=_resolution_event(session, investigation),
+        headline=report_headline(session, investigation),
+        investigation_context=investigation.investigation_context,
+        related_entities=related_entities,
+        relationships=relationships,
     )
 
 

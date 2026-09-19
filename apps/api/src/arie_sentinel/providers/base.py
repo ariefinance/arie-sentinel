@@ -30,6 +30,16 @@ class DemoDatasetUnsupported(ProviderError):
     """The non-live management demo has no configured record for this label."""
 
 
+class RegistryCoverageUnavailable(ProviderError):
+    """No FREE authoritative registry integration exists for this jurisdiction.
+
+    This is an explicit coverage limitation (not a source outage and not a
+    non-existence finding): Sentinel simply has no free primary registry for the
+    jurisdiction, and must never silently fall back to a paid provider or fabricate
+    confirmation from web search.
+    """
+
+
 @dataclass(frozen=True)
 class CandidateEntity:
     """A candidate legal entity returned by discovery/registry lookup."""
@@ -122,8 +132,15 @@ class ScreeningSubject:
 
 @runtime_checkable
 class CorporateRegistryProvider(Protocol):
-    def discover_candidates(self, company_label: str) -> list[CandidateEntity]:
-        """Return 0..N candidate legal entities for a (normalised) company label."""
+    def discover_candidates(
+        self, company_label: str, jurisdiction: str | None = None
+    ) -> list[CandidateEntity]:
+        """Return 0..N candidate legal entities for a (normalised) company label.
+
+        ``jurisdiction`` is an optional analyst-supplied routing hint (an ISO-style
+        code such as "GB" or "US"); it steers which free authoritative registry is
+        consulted and is never treated as a confirmed fact.
+        """
         ...
 
 

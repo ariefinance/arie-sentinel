@@ -3,7 +3,9 @@ import type {
   CreateInvestigationBody,
   FindingOut,
   HealthOut,
+  InvestigationBoardOut,
   InvestigationOut,
+  RelationshipGraphOut,
   Role,
   ScreeningResultOut,
   SourceOut,
@@ -140,6 +142,10 @@ export function createApiClient({
       }),
     getFindings: (id: string, signal?: AbortSignal): Promise<FindingOut[]> =>
       request<FindingOut[]>(`/investigations/${encodeURIComponent(id)}/findings`, { signal }),
+    getBoard: (id: string, signal?: AbortSignal): Promise<InvestigationBoardOut> =>
+      request<InvestigationBoardOut>(`/investigations/${encodeURIComponent(id)}/board`, { signal }),
+    getGraph: (id: string, signal?: AbortSignal): Promise<RelationshipGraphOut> =>
+      request<RelationshipGraphOut>(`/investigations/${encodeURIComponent(id)}/graph`, { signal }),
     resolveEntity: (
       id: string,
       candidateId: string,

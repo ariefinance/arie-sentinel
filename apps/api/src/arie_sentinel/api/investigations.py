@@ -18,14 +18,21 @@ from ..models.evidence import Finding, ScreeningResult, Source
 from ..models.ops import AuditEvent
 from ..schemas import (
     AuditEventOut,
+    BoardRowOut,
     CreateInvestigationRequest,
     FinaliseReportRequest,
     FindingOut,
+    GraphEdgeOut,
+    GraphNodeOut,
+    InvestigationBoardOut,
     InvestigationOut,
+    RelationshipGraphOut,
     ResolveEntityRequest,
     ScreeningResultOut,
     SourceOut,
 )
+from ..services.board import build_board
+from ..services.graph import build_graph
 from ..services.investigations import create_investigation, resolve_entity
 from ..services.reports import render_report, report_filename
 
@@ -64,6 +71,8 @@ def create(
         company_label=body.company_label,
         contact_label=body.contact_label,
         actor=principal.email,
+        investigation_context=body.investigation_context,
+        claims=body.claims,
     )
     db.commit()
     return InvestigationOut.model_validate(_load(db, inv.investigation_id))
@@ -140,6 +149,58 @@ def get_findings(
         .order_by(Finding.created_at.asc())
     ).all()
     return [FindingOut.model_validate(row) for row in rows]
+
+
+@router.get("/{investigation_id}/board", response_model=InvestigationBoardOut)
+def get_board(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> InvestigationBoardOut:
+    inv = _load(db, investigation_id)
+    rows = build_board(db, inv)
+    return InvestigationBoardOut(
+        investigation_id=inv.investigation_id,
+        investigation_context=inv.investigation_context,
+        rows=[
+            BoardRowOut(
+                key=row.key,
+                label=row.label,
+                state=row.state,
+                detail=row.detail,
+                action_required=row.action_required,
+                source_ids=row.source_ids,
+            )
+            for row in rows
+        ],
+    )
+
+
+@router.get("/{investigation_id}/graph", response_model=RelationshipGraphOut)
+def get_graph(
+    investigation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal),
+) -> RelationshipGraphOut:
+    inv = _load(db, investigation_id)
+    graph = build_graph(db, inv)
+    return RelationshipGraphOut(
+        investigation_id=inv.investigation_id,
+        nodes=[
+            GraphNodeOut(id=n.id, type=n.type, label=n.label, detail=n.detail) for n in graph.nodes
+        ],
+        edges=[
+            GraphEdgeOut(
+                source=e.source,
+                target=e.target,
+                type=e.type,
+                basis=e.basis,
+                state=e.state,
+                source_ids=e.source_ids,
+            )
+            for e in graph.edges
+        ],
+    )
 
 
 @router.get("/{investigation_id}/company", response_model=InvestigationOut)

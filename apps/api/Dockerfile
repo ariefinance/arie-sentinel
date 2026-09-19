@@ -4,8 +4,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_NO_PROGRESS=1
 
+# libpango*: WeasyPrint PDF runtime. g++/pkg-config/libicu-dev: build pyicu (a rigour
+# dependency for name/identifier normalization). libicu-dev also provides the ICU
+# shared library needed at runtime.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y libpango-1.0-0 libpangoft2-1.0-0 \
+    && apt-get install --no-install-recommends -y \
+        libpango-1.0-0 libpangoft2-1.0-0 g++ pkg-config libicu-dev \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir uv
 

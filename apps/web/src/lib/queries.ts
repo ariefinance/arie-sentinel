@@ -10,6 +10,8 @@ export const queryKeys = {
   sources: (id: string) => ['investigation', id, 'sources'] as const,
   screening: (id: string) => ['investigation', id, 'screening'] as const,
   findings: (id: string) => ['investigation', id, 'findings'] as const,
+  board: (id: string) => ['investigation', id, 'board'] as const,
+  graph: (id: string) => ['investigation', id, 'graph'] as const,
 };
 
 export function useHealth() {
@@ -62,6 +64,14 @@ export function useScreening(id: string) {
 
 export function useFindings(id: string) {
   return useQuery({ queryKey: queryKeys.findings(id), queryFn: ({ signal }) => api.getFindings(id, signal), enabled: id.length > 0 });
+}
+
+export function useBoard(id: string, enabled = true) {
+  return useQuery({ queryKey: queryKeys.board(id), queryFn: ({ signal }) => api.getBoard(id, signal), enabled: enabled && id.length > 0 });
+}
+
+export function useGraph(id: string, enabled = true) {
+  return useQuery({ queryKey: queryKeys.graph(id), queryFn: ({ signal }) => api.getGraph(id, signal), enabled: enabled && id.length > 0 });
 }
 
 export function useResolveEntity(id: string) {

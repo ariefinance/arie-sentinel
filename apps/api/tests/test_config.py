@@ -92,3 +92,13 @@ def test_production_rejects_unsafe_cors_origins(origins: str) -> None:
 )
 def test_production_accepts_explicit_https_cors_origins(origins: str) -> None:
     assert Settings(**_production_settings(cors_origins=origins)).cors_origin_list
+
+
+def test_uk_sanctions_feed_points_to_current_fcdo_list() -> None:
+    """The UK feed must be the current FCDO UK Sanctions List, not the retired OFSI path."""
+    uk = Settings().sanctions_uk_url
+    assert uk == "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml"
+    assert "sanctionslist.fcdo.gov.uk" in uk
+    # Guard against regressing to the retired OFSI consolidated-list asset path.
+    assert "uk_sanctions_list.xml" not in uk
+    assert "assets.publishing.service.gov.uk" not in uk
