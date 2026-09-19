@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -164,20 +165,15 @@ def test_sanctions_refresh_runs_at_most_once_per_interval(db: Session, monkeypat
     monkeypatch.setattr(
         worker,
         "get_settings",
-        lambda: type("SettingsStub", (), {
-            "sanctions_worker_auto_refresh": True,
-            "sanctions_worker_refresh_interval_seconds": 86400,
-        })(),
+        lambda: SimpleNamespace(
+            sanctions_worker_auto_refresh=True,
+            sanctions_worker_refresh_interval_seconds=86400,
+        ),
     )
 
     assert refresh_sanctions_if_due(db, now_monotonic=100.0) is True
     assert refresh_sanctions_if_due(db, now_monotonic=101.0) is False
-    assert (
-        refresh_sanctions_if_due(
-            db, now_monotonic=86500.0
-        )
-        is True
-    )
+    assert refresh_sanctions_if_due(db, now_monotonic=86500.0) is True
     assert len(calls) == 2
 
 
@@ -195,10 +191,10 @@ def test_sanctions_refresh_failure_does_not_raise_or_retry_tightly(
     monkeypatch.setattr(
         worker,
         "get_settings",
-        lambda: type("SettingsStub", (), {
-            "sanctions_worker_auto_refresh": True,
-            "sanctions_worker_refresh_interval_seconds": 86400,
-        })(),
+        lambda: SimpleNamespace(
+            sanctions_worker_auto_refresh=True,
+            sanctions_worker_refresh_interval_seconds=86400,
+        ),
     )
 
     assert refresh_sanctions_if_due(db, now_monotonic=200.0) is True
@@ -218,10 +214,10 @@ def test_sanctions_refresh_is_disabled_by_default(db: Session, monkeypatch) -> N
     monkeypatch.setattr(
         worker,
         "get_settings",
-        lambda: type("SettingsStub", (), {
-            "sanctions_worker_auto_refresh": False,
-            "sanctions_worker_refresh_interval_seconds": 86400,
-        })(),
+        lambda: SimpleNamespace(
+            sanctions_worker_auto_refresh=False,
+            sanctions_worker_refresh_interval_seconds=86400,
+        ),
     )
 
     assert refresh_sanctions_if_due(db, now_monotonic=1.0) is False
