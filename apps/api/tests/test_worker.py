@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from arie_sentinel.jobs import worker
 from arie_sentinel.jobs.worker import (
-    SANCTIONS_REFRESH_INTERVAL_SECONDS,
     reclaim_stale_jobs,
     refresh_sanctions_if_due,
     run_pending_jobs,
@@ -162,12 +161,20 @@ def test_sanctions_refresh_runs_at_most_once_per_interval(db: Session, monkeypat
 
     monkeypatch.setattr(worker, "refresh_feeds", fake_refresh)
     monkeypatch.setattr(worker, "_last_sanctions_refresh_at", None)
+    monkeypatch.setattr(
+        worker,
+        "get_settings",
+        lambda: type("SettingsStub", (), {
+            "sanctions_worker_auto_refresh": True,
+            "sanctions_worker_refresh_interval_seconds": 86400,
+        })(),
+    )
 
     assert refresh_sanctions_if_due(db, now_monotonic=100.0) is True
     assert refresh_sanctions_if_due(db, now_monotonic=101.0) is False
     assert (
         refresh_sanctions_if_due(
-            db, now_monotonic=100.0 + SANCTIONS_REFRESH_INTERVAL_SECONDS
+            db, now_monotonic=86500.0
         )
         is True
     )
@@ -185,7 +192,37 @@ def test_sanctions_refresh_failure_does_not_raise_or_retry_tightly(
 
     monkeypatch.setattr(worker, "refresh_feeds", failing_refresh)
     monkeypatch.setattr(worker, "_last_sanctions_refresh_at", None)
+    monkeypatch.setattr(
+        worker,
+        "get_settings",
+        lambda: type("SettingsStub", (), {
+            "sanctions_worker_auto_refresh": True,
+            "sanctions_worker_refresh_interval_seconds": 86400,
+        })(),
+    )
 
     assert refresh_sanctions_if_due(db, now_monotonic=200.0) is True
     assert refresh_sanctions_if_due(db, now_monotonic=201.0) is False
     assert len(calls) == 1
+
+
+def test_sanctions_refresh_is_disabled_by_default(db: Session, monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_refresh(session: Session):
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(worker, "refresh_feeds", fake_refresh)
+    monkeypatch.setattr(worker, "_last_sanctions_refresh_at", None)
+    monkeypatch.setattr(
+        worker,
+        "get_settings",
+        lambda: type("SettingsStub", (), {
+            "sanctions_worker_auto_refresh": False,
+            "sanctions_worker_refresh_interval_seconds": 86400,
+        })(),
+    )
+
+    assert refresh_sanctions_if_due(db, now_monotonic=1.0) is False
+    assert calls == []
