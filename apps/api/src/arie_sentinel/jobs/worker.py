@@ -23,6 +23,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..audit import record_audit
+from ..config import get_settings
 from ..db import SessionLocal
 from ..models.core import Investigation
 from ..models.enums import AuditAction, InvestigationState, JobStatus
@@ -41,7 +42,6 @@ LEASE = timedelta(minutes=5)
 # worker process to refresh the free official sanctions cache once every 24 hours. A failed
 # refresh is logged and never stops queue processing; refresh_feeds itself retains prior
 # cached records and fails closed on required-feed errors.
-SANCTIONS_REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
 _last_sanctions_refresh_at: float | None = None
 
 
@@ -182,10 +182,15 @@ def refresh_sanctions_if_due(
     """
     global _last_sanctions_refresh_at
 
+    settings = get_settings()
+    if not settings.sanctions_worker_auto_refresh:
+        return False
+
+    interval = max(300, settings.sanctions_worker_refresh_interval_seconds)
     now = time.monotonic() if now_monotonic is None else now_monotonic
     if (
         _last_sanctions_refresh_at is not None
-        and now - _last_sanctions_refresh_at < SANCTIONS_REFRESH_INTERVAL_SECONDS
+        and now - _last_sanctions_refresh_at < interval
     ):
         return False
     _last_sanctions_refresh_at = now
