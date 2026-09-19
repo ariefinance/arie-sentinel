@@ -138,7 +138,7 @@ optional and left unconfigured by default). Never commit any key.
 Sanctions-cache refresh remains available via the operational entrypoint
 `python -m arie_sentinel.jobs.refresh_sanctions`. In the Railway demo, the existing
 PostgreSQL worker also refreshes the official feeds automatically at most once every
-24 hours, avoiding the need for a separate cron service. No manual scheduling step is
+24 hours when `ARIE_SANCTIONS_WORKER_AUTO_REFRESH=true`, avoiding the need for a separate cron service. No manual scheduling step is
 required of the operator. Screening treats a
 stale/missing/empty required feed as a coverage limitation, not a clearance.
 
