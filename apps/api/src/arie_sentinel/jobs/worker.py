@@ -170,9 +170,7 @@ def _mark_investigation_failed(session: Session, job: Job, exc: Exception) -> No
     session.commit()
 
 
-def refresh_sanctions_if_due(
-    session: Session, *, now_monotonic: float | None = None
-) -> bool:
+def refresh_sanctions_if_due(session: Session, *, now_monotonic: float | None = None) -> bool:
     """Refresh official sanctions feeds at most once per 24 hours per worker process.
 
     Returns True when a refresh attempt ran. The timestamp is advanced before network
@@ -187,10 +185,7 @@ def refresh_sanctions_if_due(
 
     interval = max(300, settings.sanctions_worker_refresh_interval_seconds)
     now = time.monotonic() if now_monotonic is None else now_monotonic
-    if (
-        _last_sanctions_refresh_at is not None
-        and now - _last_sanctions_refresh_at < interval
-    ):
+    if _last_sanctions_refresh_at is not None and now - _last_sanctions_refresh_at < interval:
         return False
     _last_sanctions_refresh_at = now
 
@@ -211,6 +206,7 @@ def refresh_sanctions_if_due(
             logger.warning("sanctions feed %s failed: %s", result.feed, result.detail)
     logger.info("sanctions refresh complete: %d feed(s), %d failure(s)", len(results), failures)
     return True
+
 
 def run_worker(
     poll_interval: float = 2.0,
