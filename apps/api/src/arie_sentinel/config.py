@@ -50,13 +50,17 @@ class Settings(BaseSettings):
     # PostgreSQL cache; screening reads the cache, never a paid aggregator.
     #  - OFAC SDN (US Treasury Sanctions List Service), XML.
     #  - UN Consolidated List, XML.
-    #  - UK Sanctions List (GOV.UK; the retired OFSI consolidated list is not used), XML.
+    #  - UK Sanctions List (GOV.UK / FCDO; the sole UK designation source since the
+    #    OFSI consolidated list closed), XML.
     #  - EU Financial Sanctions Files (FSF), XML.
     sanctions_ofac_url: str = (
         "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML"
     )
     sanctions_un_url: str = "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
-    sanctions_uk_url: str = "https://assets.publishing.service.gov.uk/media/uk_sanctions_list.xml"
+    # Authoritative UK Sanctions List XML published by the FCDO. The retired OFSI
+    # consolidated-list path (assets.publishing.service.gov.uk/.../uk_sanctions_list.xml)
+    # is NOT used.
+    sanctions_uk_url: str = "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml"
     sanctions_eu_url: str | None = None
     # Feeds that MUST be present and fresh before screening may report NO_MATERIAL_MATCH.
     sanctions_required_feeds: str = "OFAC,UN,UK"

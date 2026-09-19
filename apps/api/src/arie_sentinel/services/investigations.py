@@ -232,8 +232,10 @@ def run_discovery(
         )
     except RegistryCoverageUnavailable as exc:
         # No FREE authoritative registry covers this jurisdiction. This is an explicit
-        # coverage limitation, NOT a source outage and NOT a nonexistence finding.
-        inv.investigation_state = InvestigationState.COMPLETED
+        # coverage limitation, NOT a source outage and NOT a nonexistence finding. Legal
+        # identity stays NOT_VERIFIED and no Counterparty is created — but the safe checks
+        # that do not require a resolved legal entity STILL run, so an SME outside GB and
+        # outside the LEI population is not left with an empty investigation.
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
         inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
         inv.clarification_reason = str(exc)
@@ -245,11 +247,11 @@ def run_discovery(
             investigation_id=inv.investigation_id,
             rationale=str(exc),
             payload={
-                "investigation_state": inv.investigation_state.value,
                 "coverage": "free-registry-unavailable",
                 "jurisdiction_hint": jurisdiction_hint,
             },
         )
+        _run_unresolved_checks(session, inv, providers)
         return
     except DemoDatasetUnsupported as exc:
         inv.investigation_state = InvestigationState.SOURCE_UNAVAILABLE
@@ -370,9 +372,12 @@ def run_discovery(
         )
 
     if len(candidates) == 0:
+        # A covered registry returned no candidate: identity stays NOT_VERIFIED, but the
+        # safe non-registry checks still run (website/RDAP, public intelligence, GDELT,
+        # name screening) rather than ending the investigation empty.
         inv.company_identity_status = CompanyIdentityStatus.NOT_VERIFIED
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
-        inv.investigation_state = InvestigationState.COMPLETED
+        _run_unresolved_checks(session, inv, providers)
     else:
         inv.company_identity_status = CompanyIdentityStatus.AMBIGUOUS
         inv.completeness_state = CompletenessState.COMPLETE_WITH_LIMITATIONS
@@ -386,6 +391,41 @@ def run_discovery(
             rationale="Registry search produced candidates; analyst resolution required.",
             payload={"candidate_count": len(candidates)},
         )
+
+
+def _run_unresolved_checks(
+    session: Session, inv: Investigation, providers: Providers | Any
+) -> None:
+    """Run the safe checks that do NOT require a resolved authoritative legal entity.
+
+    Used when legal identity could not be resolved (no free registry coverage, or no
+    candidate). Legal identity remains NOT_VERIFIED and NO Counterparty is created; these
+    checks operate on the raw supplied label + intake claims only. Sanctions screening is
+    performed against the unresolved label with an explicit unresolved-identity caveat.
+    """
+    record_audit(
+        session,
+        actor="system:unresolved_checks",
+        action=AuditAction.STATE_CHANGE,
+        object_type="investigation",
+        investigation_id=inv.investigation_id,
+        rationale=(
+            "Legal identity is unresolved; running safe non-registry checks "
+            "(website/RDAP, public intelligence, news discovery, name screening, "
+            "non-registry contradictions). Any screening result is against an unresolved "
+            "company label and cannot be attributed to a confirmed legal entity."
+        ),
+        payload={"mode": "unresolved-identity"},
+    )
+    # Screening against the unresolved label (entity=None -> no registry identifiers).
+    _run_screening(session, inv, providers, entity=None)
+    # Website/RDAP + public-web discovery (both consume the raw label + intake claims).
+    _run_public_intelligence(session, inv, providers)
+    # News discovery (GDELT); SEC/Companies House stay gated off without a resolved entity.
+    _run_supplementary_sources(session, inv, providers)
+    # Only contradictions that do not require authoritative registry facts.
+    run_contradiction_checks(session, inv, None)
+    inv.investigation_state = InvestigationState.COMPLETED
 
 
 def resolve_entity(

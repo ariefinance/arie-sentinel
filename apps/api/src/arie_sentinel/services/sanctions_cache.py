@@ -98,6 +98,7 @@ def refresh_feeds(
         timeout=settings.provider_timeout_seconds, follow_redirects=True
     )
     results: list[FeedRefreshResult] = []
+    required = set(required_feeds(settings))
     try:
         for name in targets:
             url = configured.get(name)
@@ -116,6 +117,21 @@ def refresh_feeds(
             except ProviderError as exc:
                 state.status = "failed"
                 state.detail = f"{type(exc).__name__}: {exc}"
+                session.merge(state)
+                session.flush()
+                results.append(FeedRefreshResult(name, "failed", 0, state.detail))
+                continue
+            # Fail closed on an empty parse for REQUIRED feeds: a download that parses
+            # to zero usable entities is an invalid refresh (a schema change or a
+            # truncated/placeholder file), never a legitimate "empty sanctions list".
+            # Retain the previously cached records and mark the feed failed so coverage
+            # stays incomplete and NO_MATERIAL_MATCH cannot be asserted.
+            if name in required and not entities:
+                state.status = "failed"
+                state.detail = (
+                    "empty parse: download succeeded but zero usable entities were parsed "
+                    "for a required feed; previous cache retained"
+                )
                 session.merge(state)
                 session.flush()
                 results.append(FeedRefreshResult(name, "failed", 0, state.detail))

@@ -17,6 +17,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .base import ProviderUnavailable, ScreeningHit, ScreeningSubject
+from .normalization import (
+    identifier_key,
+    name_match_key,
+    name_similarity,
+    org_name_key,
+)
 
 
 @dataclass(frozen=True)
@@ -31,39 +37,56 @@ class SanctionedEntity:
     profile_id: str | None = None
 
 
-def _norm(value: str) -> str:
-    return " ".join(value.lower().split())
+# A fuzzy name match at or above this similarity is surfaced as a POTENTIAL_MATCH for
+# analyst review. Fuzzy matches are NEVER auto-confirmed.
+_FUZZY_THRESHOLD = 0.86
 
 
-def _norm_id(value: str) -> str:
-    return "".join(ch for ch in value.lower() if ch.isalnum())
+def _keys(label: str, aliases: tuple[str, ...]) -> tuple[set[str], set[str]]:
+    """Return (name_match_keys, org_name_keys) for a label and its aliases."""
+    values = [label, *aliases]
+    name_keys = {name_match_key(v) for v in values if v}
+    org_keys = {org_name_key(v) for v in values if v}
+    return {k for k in name_keys if k}, {k for k in org_keys if k}
 
 
 @dataclass
 class SanctionsMatcher:
-    """Screens a subject against a normalized set of official sanctions entities."""
+    """Screens a subject against a normalized set of official sanctions entities.
+
+    Normalization and fuzzy similarity are delegated to ``rigour`` (see
+    ``providers/normalization.py``). Identity is never auto-confirmed: identifier and
+    exact-name overlaps and fuzzy near-matches all yield POTENTIAL_MATCH; conflicting
+    date-of-birth evidence suppresses obvious false positives.
+    """
 
     entities: tuple[SanctionedEntity, ...] = field(default_factory=tuple)
 
     def screen(self, subject: ScreeningSubject) -> list[ScreeningHit]:
-        subj_names = {_norm(subject.label)} | {_norm(a) for a in subject.aliases}
-        subj_ids = {_norm_id(v) for values in subject.identifiers.values() for v in values if v}
+        subj_names, subj_orgs = _keys(subject.label, subject.aliases)
+        subj_ids = {
+            identifier_key(v) for values in subject.identifiers.values() for v in values if v
+        }
+        subj_ids.discard("")
         subj_dobs = set(subject.birth_dates)
         subj_countries = {c.upper() for c in subject.countries}
         hits: list[ScreeningHit] = []
         for entity in self.entities:
-            ent_names = {_norm(entity.name)} | {_norm(a) for a in entity.aliases}
-            ent_ids = {_norm_id(i) for i in entity.identifiers if i}
+            ent_names, ent_orgs = _keys(entity.name, entity.aliases)
+            ent_ids = {identifier_key(i) for i in entity.identifiers if i}
+            ent_ids.discard("")
             id_overlap = subj_ids & ent_ids
-            name_overlap = subj_names & ent_names
+            name_overlap = (subj_names & ent_names) or (subj_orgs & ent_orgs)
+            dob_conflict = bool(
+                subj_dobs and entity.birth_dates and not (subj_dobs & set(entity.birth_dates))
+            )
             basis: str | None = None
             score = 0.0
             if id_overlap:
                 basis = f"identifier match ({', '.join(sorted(id_overlap))}); requires review"
                 score = 0.95
             elif name_overlap:
-                # Use DOB / country to suppress obvious false positives.
-                if subj_dobs and entity.birth_dates and not (subj_dobs & set(entity.birth_dates)):
+                if dob_conflict:
                     continue  # same name, different date of birth -> not a match
                 if (
                     subj_countries
@@ -75,6 +98,16 @@ class SanctionsMatcher:
                 else:
                     basis = "name/alias match; identity not confirmed — analyst review required"
                     score = 0.6
+            else:
+                # Fuzzy near-match (typo/transliteration). Never auto-confirmed; suppressed
+                # by a conflicting date of birth.
+                similarity = self._best_similarity(subj_orgs, ent_orgs)
+                if similarity >= _FUZZY_THRESHOLD and not dob_conflict:
+                    basis = (
+                        f"fuzzy name match (similarity {similarity:.2f}); "
+                        "identity not confirmed — analyst review required"
+                    )
+                    score = round(similarity, 2)
             if basis is None:
                 continue
             hits.append(
@@ -90,6 +123,20 @@ class SanctionsMatcher:
                 )
             )
         return hits
+
+    @staticmethod
+    def _best_similarity(left: set[str], right: set[str]) -> float:
+        best = 0.0
+        for a in left:
+            for b in right:
+                # Cheap prefilter: only compare when a leading character is shared, to
+                # bound the cost of fuzzy comparison across a large feed.
+                if not a or not b or a[0] != b[0]:
+                    continue
+                best = max(best, name_similarity(a, b))
+                if best >= 0.999:
+                    return best
+        return best
 
 
 class OfficialSanctionsProvider:

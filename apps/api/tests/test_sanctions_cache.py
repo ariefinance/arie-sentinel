@@ -131,6 +131,50 @@ def test_screening_surfaces_potential_match_never_auto_confirms(db: Session) -> 
     assert inv.screening_state is ScreeningState.POTENTIAL_MATCH
 
 
+def _empty_ofac_client() -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/SDN.XML":
+            # Valid XML that parses to ZERO entities (schema change / truncated file).
+            return httpx.Response(200, content=b"<sdnList></sdnList>", request=request)
+        return httpx.Response(200, content=_BODIES[path], request=request)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_empty_parse_for_required_feed_retains_prior_cache(db: Session) -> None:
+    # Seed a prior OFAC cache, then a refresh where OFAC parses to zero.
+    db.add(
+        SanctionsRecord(
+            feed="OFAC",
+            name="Prior OFAC Entity",
+            entity_type="entity",
+            refreshed_at=datetime.now(UTC),
+        )
+    )
+    db.commit()
+    results = {r.feed: r for r in refresh_feeds(db, _SETTINGS, client=_empty_ofac_client())}
+    db.commit()
+    assert results["OFAC"].status == "failed"
+    # Prior OFAC records are retained, never wiped by an empty parse.
+    retained = db.scalars(select(SanctionsRecord).where(SanctionsRecord.feed == "OFAC")).all()
+    assert [r.name for r in retained] == ["Prior OFAC Entity"]
+    report = coverage_report(db, _SETTINGS)
+    assert not report.is_complete
+    assert "OFAC" in report.stale_or_missing
+
+
+def test_empty_parse_initial_refresh_is_failed_and_blocks_clearance(db: Session) -> None:
+    results = {r.feed: r for r in refresh_feeds(db, _SETTINGS, client=_empty_ofac_client())}
+    db.commit()
+    assert results["OFAC"].status == "failed"
+    assert coverage_report(db, _SETTINGS).is_complete is False
+    # Screening cannot assert NO_MATERIAL_MATCH while a required feed is not fresh.
+    inv = _investigation(db)
+    _run_screening(db, inv, SimpleNamespace(screening=OfficialSanctionsProvider()))
+    assert inv.screening_state is None
+
+
 def test_load_matcher_reads_cached_records(db: Session) -> None:
     refresh_feeds(db, _SETTINGS, client=_mock_client())
     db.commit()
