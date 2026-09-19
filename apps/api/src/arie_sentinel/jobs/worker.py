@@ -45,7 +45,6 @@ LEASE = timedelta(minutes=5)
 _last_sanctions_refresh_at: float | None = None
 
 
-
 def reclaim_stale_jobs(session: Session) -> int:
     """Return stuck RUNNING jobs (lease expired) to PENDING so they are retried."""
     cutoff = datetime.now(UTC) - LEASE
