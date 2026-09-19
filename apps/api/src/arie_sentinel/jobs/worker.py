@@ -23,11 +23,13 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..audit import record_audit
+from ..config import get_settings
 from ..db import SessionLocal
 from ..models.core import Investigation
 from ..models.enums import AuditAction, InvestigationState, JobStatus
 from ..models.ops import Job
 from ..services.investigations import run_discovery, run_enrichment
+from ..services.sanctions_cache import refresh_feeds
 
 logger = logging.getLogger("arie_sentinel.worker")
 
@@ -35,6 +37,12 @@ WORKER_ID = f"worker-{uuid.uuid4().hex[:8]}"
 # A claimed job must complete within the lease; otherwise it is presumed the
 # worker crashed and the job is reclaimed for another worker.
 LEASE = timedelta(minutes=5)
+
+# Railway's demo plan cannot provision a separate cron service. Reuse the already-running
+# worker process to refresh the free official sanctions cache once every 24 hours. A failed
+# refresh is logged and never stops queue processing; refresh_feeds itself retains prior
+# cached records and fails closed on required-feed errors.
+_last_sanctions_refresh_at: float | None = None
 
 
 def reclaim_stale_jobs(session: Session) -> int:
@@ -162,6 +170,44 @@ def _mark_investigation_failed(session: Session, job: Job, exc: Exception) -> No
     session.commit()
 
 
+def refresh_sanctions_if_due(session: Session, *, now_monotonic: float | None = None) -> bool:
+    """Refresh official sanctions feeds at most once per 24 hours per worker process.
+
+    Returns True when a refresh attempt ran. The timestamp is advanced before network
+    work begins so an upstream outage cannot create a tight retry loop. Provider/feed
+    failures are recorded by refresh_feeds and do not kill the investigation worker.
+    """
+    global _last_sanctions_refresh_at
+
+    settings = get_settings()
+    if not settings.sanctions_worker_auto_refresh:
+        return False
+
+    interval = max(300, settings.sanctions_worker_refresh_interval_seconds)
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    if _last_sanctions_refresh_at is not None and now - _last_sanctions_refresh_at < interval:
+        return False
+    _last_sanctions_refresh_at = now
+
+    try:
+        results = refresh_feeds(session)
+        session.commit()
+    except Exception as exc:  # noqa: BLE001 - refresh must never kill worker
+        session.rollback()
+        logger.warning("sanctions refresh failed unexpectedly; worker continues: %s", exc)
+        return True
+
+    failures = 0
+    for result in results:
+        if result.status == "ok":
+            logger.info("sanctions feed %s: %d entities", result.feed, result.entity_count)
+        else:
+            failures += 1
+            logger.warning("sanctions feed %s failed: %s", result.feed, result.detail)
+    logger.info("sanctions refresh complete: %d feed(s), %d failure(s)", len(results), failures)
+    return True
+
+
 def run_worker(
     poll_interval: float = 2.0,
     *,
@@ -184,6 +230,7 @@ def run_worker(
         session = SessionLocal()
         try:
             processed = run_pending_jobs(session)
+            refresh_sanctions_if_due(session)
         except Exception as exc:  # noqa: BLE001 - logged, not swallowed; worker survives
             errored = True
             try:

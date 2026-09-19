@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     sanctions_required_feeds: str = "OFAC,UN,UK"
     # A cached feed older than this is treated as stale (coverage limitation, not clear).
     sanctions_cache_max_age_hours: int = 168
+    # Optional in-process scheduler for constrained deployments that cannot provision a
+    # separate cron service. Disabled by default; Railway demo enables it explicitly.
+    sanctions_worker_auto_refresh: bool = False
+    sanctions_worker_refresh_interval_seconds: int = 24 * 60 * 60
     # Hard cap on a single feed download to bound memory / DoS from a hostile response.
     sanctions_feed_max_bytes: int = 64 * 1024 * 1024
 
