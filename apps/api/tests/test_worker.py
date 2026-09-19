@@ -8,7 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from arie_sentinel.jobs import worker
-from arie_sentinel.jobs.worker import reclaim_stale_jobs, run_pending_jobs
+from arie_sentinel.jobs.worker import (
+    SANCTIONS_REFRESH_INTERVAL_SECONDS,
+    reclaim_stale_jobs,
+    refresh_sanctions_if_due,
+    run_pending_jobs,
+)
 from arie_sentinel.models.core import EntityCandidate, Identifier, Investigation
 from arie_sentinel.models.enums import CompanyIdentityStatus, InvestigationState, JobStatus
 from arie_sentinel.models.evidence import Evidence, Finding, ScreeningResult, Source
@@ -146,3 +151,41 @@ def test_enrichment_completes_and_retry_is_idempotent(db: Session) -> None:
         for model in material_models
     }
     assert after == before
+
+
+def test_sanctions_refresh_runs_at_most_once_per_interval(db: Session, monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_refresh(session: Session):
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(worker, "refresh_feeds", fake_refresh)
+    monkeypatch.setattr(worker, "_last_sanctions_refresh_at", None)
+
+    assert refresh_sanctions_if_due(db, now_monotonic=100.0) is True
+    assert refresh_sanctions_if_due(db, now_monotonic=101.0) is False
+    assert (
+        refresh_sanctions_if_due(
+            db, now_monotonic=100.0 + SANCTIONS_REFRESH_INTERVAL_SECONDS
+        )
+        is True
+    )
+    assert len(calls) == 2
+
+
+def test_sanctions_refresh_failure_does_not_raise_or_retry_tightly(
+    db: Session, monkeypatch
+) -> None:
+    calls: list[int] = []
+
+    def failing_refresh(session: Session):
+        calls.append(1)
+        raise RuntimeError("simulated refresh outage")
+
+    monkeypatch.setattr(worker, "refresh_feeds", failing_refresh)
+    monkeypatch.setattr(worker, "_last_sanctions_refresh_at", None)
+
+    assert refresh_sanctions_if_due(db, now_monotonic=200.0) is True
+    assert refresh_sanctions_if_due(db, now_monotonic=201.0) is False
+    assert len(calls) == 1
